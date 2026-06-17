@@ -1,0 +1,367 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import {
+  flowTriggerTypes,
+  type CreateFlowInput,
+  type FlowBotRef,
+  type FlowChannelRef,
+  type FlowEdge,
+  type FlowNode,
+  type FlowNodeData,
+  type FlowNodeType,
+} from "@crm/shared";
+import { createFlow, fetchFlow, updateFlow } from "@/lib/bff";
+import { nodeTypes } from "./FlowNodes";
+import { NodeInspector } from "./NodeInspector";
+
+const PALETTE: { type: FlowNodeType; label: string }[] = [
+  { type: "sendMessage", label: "💬 Enviar mensaje" },
+  { type: "askQuestion", label: "❓ Preguntar y guardar" },
+  { type: "condition", label: "🔀 Condición" },
+  { type: "action", label: "⚡ Acción" },
+];
+
+function defaultData(type: FlowNodeType): FlowNodeData {
+  switch (type) {
+    case "sendMessage":
+      return { text: "" };
+    case "askQuestion":
+      return { text: "", variable: "" };
+    case "condition":
+      return { branches: [] };
+    case "action":
+      return { action: "ai", botId: null };
+    default:
+      return {};
+  }
+}
+
+export function FlowBuilder({
+  flowId,
+  channels,
+  bots,
+  stages,
+  onBack,
+}: {
+  flowId: string | null; // null = nuevo
+  channels: FlowChannelRef[];
+  bots: FlowBotRef[];
+  stages: { id: string; name: string }[];
+  onBack: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const isNew = !flowId;
+
+  const { data: loaded } = useQuery({
+    queryKey: ["flow", flowId],
+    queryFn: () => fetchFlow(flowId!),
+    enabled: !isNew,
+  });
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [name, setName] = useState("Nuevo flujo");
+  const [isActive, setIsActive] = useState(false);
+  const [triggerType, setTriggerType] = useState<string>("conversation_start");
+  const [triggerKeywords, setTriggerKeywords] = useState("");
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const idCounter = useRef(1);
+  const initialized = useRef(false);
+
+  // Inicializar el lienzo: cargar el flujo existente o sembrar un nodo "Inicio".
+  useEffect(() => {
+    if (initialized.current) return;
+    if (isNew) {
+      setNodes([
+        { id: "start", type: "start", position: { x: 260, y: 40 }, data: {} },
+      ]);
+      initialized.current = true;
+    } else if (loaded) {
+      setName(loaded.name);
+      setIsActive(loaded.isActive);
+      setTriggerType(loaded.triggerType);
+      setTriggerKeywords(loaded.triggerKeywords.join(", "));
+      setChannelId(loaded.channelId);
+      setNodes(loaded.nodes as unknown as Node[]);
+      setEdges(loaded.edges as unknown as Edge[]);
+      initialized.current = true;
+    }
+  }, [isNew, loaded, setNodes, setEdges]);
+
+  const onConnect = useCallback(
+    (c: Connection) => setEdges((eds) => addEdge({ ...c, label: c.sourceHandle ?? undefined }, eds)),
+    [setEdges],
+  );
+
+  function addNode(type: FlowNodeType) {
+    const id = `n_${Date.now()}_${idCounter.current++}`;
+    const node: Node = {
+      id,
+      type,
+      position: { x: 120 + Math.random() * 120, y: 160 + Math.random() * 160 },
+      data: defaultData(type) as Record<string, unknown>,
+    };
+    setNodes((nds) => [...nds, node]);
+    setSelectedId(id);
+  }
+
+  function updateNodeData(data: FlowNodeData) {
+    if (!selectedId) return;
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === selectedId ? { ...n, data: data as Record<string, unknown> } : n,
+      ),
+    );
+  }
+
+  function deleteSelected() {
+    if (!selectedId || selectedId === "start") return;
+    setNodes((nds) => nds.filter((n) => n.id !== selectedId));
+    setEdges((eds) =>
+      eds.filter((e) => e.source !== selectedId && e.target !== selectedId),
+    );
+    setSelectedId(null);
+  }
+
+  const selectedNode = useMemo(
+    () => nodes.find((n) => n.id === selectedId) ?? null,
+    [nodes, selectedId],
+  );
+
+  const save = useMutation({
+    mutationFn: () => {
+      const payload: CreateFlowInput = {
+        name,
+        isActive,
+        channelId,
+        triggerType: triggerType as CreateFlowInput["triggerType"],
+        triggerKeywords: triggerKeywords
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean),
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          type: n.type as FlowNode["type"],
+          position: n.position,
+          data: n.data as FlowNodeData,
+        })),
+        edges: edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle ?? null,
+          label: typeof e.label === "string" ? e.label : undefined,
+        })) as FlowEdge[],
+      };
+      return isNew ? createFlow(payload) : updateFlow(flowId!, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["flows"] });
+      onBack();
+    },
+  });
+
+  return (
+    <div style={{ height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
+      {/* Barra superior */}
+      <div style={bar}>
+        <button onClick={onBack} style={ghost}>
+          ← Volver
+        </button>
+        <input
+          style={{ ...input, width: 200, fontWeight: 600 }}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={miniLbl}>Disparador</span>
+          <select
+            style={{ ...input, width: 150 }}
+            value={triggerType}
+            onChange={(e) => setTriggerType(e.target.value)}
+          >
+            {flowTriggerTypes.map((t) => (
+              <option key={t} value={t}>
+                {t === "conversation_start" ? "Al iniciar chat" : "Palabra clave"}
+              </option>
+            ))}
+          </select>
+        </div>
+        {triggerType === "keyword" && (
+          <input
+            style={{ ...input, width: 180 }}
+            value={triggerKeywords}
+            placeholder="hola, info, precio"
+            onChange={(e) => setTriggerKeywords(e.target.value)}
+          />
+        )}
+        <select
+          style={{ ...input, width: 160 }}
+          value={channelId ?? ""}
+          onChange={(e) => setChannelId(e.target.value || null)}
+        >
+          <option value="">Cualquier número</option>
+          {channels.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label ?? c.displayPhoneNumber ?? c.id}
+            </option>
+          ))}
+        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={isActive}
+            onChange={(e) => setIsActive(e.target.checked)}
+          />
+          Activo
+        </label>
+        <div style={{ flex: 1 }} />
+        {save.isError && (
+          <span style={{ color: "#ff6b6b", fontSize: 12 }}>
+            {(save.error as Error).message}
+          </span>
+        )}
+        <button
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+          style={primary}
+        >
+          {save.isPending ? "Guardando…" : "Guardar flujo"}
+        </button>
+      </div>
+
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        {/* Paleta */}
+        <aside style={palette}>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+            Arrastra el lienzo, conecta los ● y añade bloques:
+          </div>
+          {PALETTE.map((p) => (
+            <button key={p.type} onClick={() => addNode(p.type)} style={paletteBtn}>
+              {p.label}
+            </button>
+          ))}
+        </aside>
+
+        {/* Lienzo */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={(_, n) => setSelectedId(n.id)}
+            onPaneClick={() => setSelectedId(null)}
+            nodeTypes={nodeTypes}
+            fitView
+            colorMode="dark"
+          >
+            <Background />
+            <Controls />
+            <MiniMap pannable zoomable />
+          </ReactFlow>
+        </div>
+
+        {/* Inspector */}
+        {selectedNode && (
+          <aside style={inspector}>
+            <NodeInspector
+              node={selectedNode}
+              bots={bots}
+              stages={stages}
+              onChange={updateNodeData}
+              onDelete={deleteSelected}
+            />
+          </aside>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const bar: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "10px 16px",
+  borderBottom: "1px solid var(--border)",
+  flexWrap: "wrap",
+};
+
+const palette: React.CSSProperties = {
+  width: 210,
+  flexShrink: 0,
+  borderRight: "1px solid var(--border)",
+  padding: 14,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const inspector: React.CSSProperties = {
+  width: 300,
+  flexShrink: 0,
+  borderLeft: "1px solid var(--border)",
+  padding: 16,
+  overflowY: "auto",
+};
+
+const input: React.CSSProperties = {
+  padding: "7px 10px",
+  borderRadius: 7,
+  border: "1px solid var(--border)",
+  background: "#0d1320",
+  color: "var(--text)",
+  fontSize: 13,
+  boxSizing: "border-box",
+};
+
+const miniLbl: React.CSSProperties = { fontSize: 12, color: "var(--muted)" };
+
+const ghost: React.CSSProperties = {
+  padding: "7px 12px",
+  borderRadius: 7,
+  border: "1px solid var(--border)",
+  background: "transparent",
+  color: "var(--muted)",
+  cursor: "pointer",
+  fontSize: 13,
+};
+
+const primary: React.CSSProperties = {
+  padding: "8px 16px",
+  borderRadius: 7,
+  border: "none",
+  background: "var(--accent)",
+  color: "#04210f",
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const paletteBtn: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: "1px solid var(--border)",
+  background: "var(--panel)",
+  color: "var(--text)",
+  cursor: "pointer",
+  fontSize: 13,
+  textAlign: "left",
+};

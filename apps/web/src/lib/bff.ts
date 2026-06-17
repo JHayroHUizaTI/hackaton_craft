@@ -21,6 +21,22 @@ import type {
   SendMessageInput,
   ConnectWhatsappInput,
   WhatsappChannel,
+  BotsResponse,
+  BotDto,
+  CreateBotInput,
+  UpdateBotInput,
+  FlowsResponse,
+  FlowDto,
+  CreateFlowInput,
+  UpdateFlowInput,
+  TemplateDto,
+  CreateTemplateInput,
+  UpdateTemplateInput,
+  CampaignDto,
+  CampaignMeta,
+  CreateCampaignInput,
+  UpdateCampaignInput,
+  AudiencePreview,
 } from "@crm/shared";
 
 // Fetchers del lado del cliente: llaman al BFF (mismo origen, cookie httpOnly).
@@ -157,6 +173,214 @@ export async function disconnectWhatsapp(
   if (!res.ok) throw new Error("No se pudo desconectar");
   const data = (await res.json()) as { channels: WhatsappChannel[] };
   return data.channels ?? [];
+}
+
+// ── Bots (agentes IA) ────────────────────────────────────────
+export async function fetchBots(): Promise<BotsResponse> {
+  const res = await fetch("/api/bff/bots");
+  if (!res.ok) throw new Error("No se pudieron cargar los bots");
+  return res.json();
+}
+
+export async function createBot(input: CreateBotInput): Promise<BotDto> {
+  const res = await fetch("/api/bff/bots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear el bot");
+  }
+  return res.json();
+}
+
+export async function updateBot(
+  id: string,
+  input: UpdateBotInput,
+): Promise<BotDto> {
+  const res = await fetch(`/api/bff/bots/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo guardar el bot");
+  }
+  return res.json();
+}
+
+export async function deleteBot(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/bots/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo eliminar el bot");
+  }
+}
+
+// ── Flujos (constructor visual) ──────────────────────────────
+export async function fetchFlows(): Promise<FlowsResponse> {
+  const res = await fetch("/api/bff/flows");
+  if (!res.ok) throw new Error("No se pudieron cargar los flujos");
+  return res.json();
+}
+
+export async function fetchFlow(id: string): Promise<FlowDto> {
+  const res = await fetch(`/api/bff/flows/${id}`);
+  if (!res.ok) throw new Error("No se pudo cargar el flujo");
+  return res.json();
+}
+
+export async function createFlow(input: CreateFlowInput): Promise<FlowDto> {
+  const res = await fetch("/api/bff/flows", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear el flujo");
+  }
+  return res.json();
+}
+
+export async function updateFlow(
+  id: string,
+  input: UpdateFlowInput,
+): Promise<FlowDto> {
+  const res = await fetch(`/api/bff/flows/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo guardar el flujo");
+  }
+  return res.json();
+}
+
+export async function deleteFlow(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/flows/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo eliminar el flujo");
+}
+
+// ── Plantillas ───────────────────────────────────────────────
+export async function fetchTemplates(): Promise<TemplateDto[]> {
+  const res = await fetch("/api/bff/templates");
+  if (!res.ok) throw new Error("No se pudieron cargar las plantillas");
+  return res.json();
+}
+
+export async function createTemplate(
+  input: CreateTemplateInput,
+): Promise<TemplateDto> {
+  const res = await fetch("/api/bff/templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear la plantilla");
+  }
+  return res.json();
+}
+
+export async function updateTemplate(
+  id: string,
+  input: UpdateTemplateInput,
+): Promise<TemplateDto> {
+  const res = await fetch(`/api/bff/templates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar la plantilla");
+  return res.json();
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/templates/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo eliminar la plantilla");
+  }
+}
+
+// ── Campañas ─────────────────────────────────────────────────
+export async function fetchCampaigns(): Promise<CampaignDto[]> {
+  const res = await fetch("/api/bff/campaigns");
+  if (!res.ok) throw new Error("No se pudieron cargar las campañas");
+  return res.json();
+}
+
+export async function fetchCampaignMeta(): Promise<CampaignMeta> {
+  const res = await fetch("/api/bff/campaigns/meta");
+  if (!res.ok) throw new Error("No se pudieron cargar los datos de campaña");
+  return res.json();
+}
+
+export async function fetchAudiencePreview(
+  tagIds: string[],
+): Promise<AudiencePreview> {
+  const res = await fetch(
+    `/api/bff/campaigns/audience?tagIds=${encodeURIComponent(tagIds.join(","))}`,
+  );
+  if (!res.ok) throw new Error("No se pudo calcular la audiencia");
+  return res.json();
+}
+
+export async function createCampaign(
+  input: CreateCampaignInput,
+): Promise<CampaignDto> {
+  const res = await fetch("/api/bff/campaigns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear la campaña");
+  }
+  return res.json();
+}
+
+export async function updateCampaign(
+  id: string,
+  input: UpdateCampaignInput,
+): Promise<CampaignDto> {
+  const res = await fetch(`/api/bff/campaigns/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar la campaña");
+  return res.json();
+}
+
+export async function launchCampaign(id: string): Promise<CampaignDto> {
+  const res = await fetch(`/api/bff/campaigns/${id}/launch`, { method: "POST" });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo lanzar la campaña");
+  }
+  return res.json();
+}
+
+export async function cancelCampaign(id: string): Promise<CampaignDto> {
+  const res = await fetch(`/api/bff/campaigns/${id}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error("No se pudo cancelar la campaña");
+  return res.json();
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/campaigns/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo eliminar la campaña");
+  }
 }
 
 // ── Base de conocimiento (RAG) ───────────────────────────────

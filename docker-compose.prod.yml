@@ -50,6 +50,9 @@ services:
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
       WHATSAPP_GRAPH_VERSION: ${WHATSAPP_GRAPH_VERSION:-v21.0}
+      # Credenciales del admin inicial (las usa el seed).
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@crm.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin1234}
     # Sin "ports": Nginx Proxy Manager lo alcanza por la red "proxy" como crm-api:3001.
     expose:
       - "3001"

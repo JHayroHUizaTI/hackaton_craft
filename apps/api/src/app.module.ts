@@ -12,6 +12,7 @@ import { ContactsModule } from "./modules/contacts/contacts.module";
 import { UsersModule } from "./modules/users/users.module";
 import { AiModule } from "./modules/ai/ai.module";
 import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
+import { CampaignsModule } from "./modules/campaigns/campaigns.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -33,6 +34,7 @@ import { HealthController } from "./health.controller";
     UsersModule,
     KnowledgeModule,
     AiModule,
+    CampaignsModule,
   ],
   controllers: [HealthController],
 })

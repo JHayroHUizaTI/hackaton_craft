@@ -57,6 +57,35 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     });
   }
 
+  async sendTemplate(
+    to: string,
+    templateName: string,
+    language: string,
+    variables: string[],
+    fromPhoneNumberId?: string,
+  ): Promise<SendResult> {
+    const creds = await this.connection.resolveCreds(fromPhoneNumberId);
+    if (!creds) return this.simulate("template", to, templateName);
+    const components = variables.length
+      ? [
+          {
+            type: "body",
+            parameters: variables.map((v) => ({ type: "text", text: v })),
+          },
+        ]
+      : [];
+    return this.post(creds, {
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: language },
+        ...(components.length ? { components } : {}),
+      },
+    });
+  }
+
   async downloadMedia(
     mediaId: string,
     fromPhoneNumberId?: string,

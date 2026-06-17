@@ -34,6 +34,18 @@ export interface WhatsAppProvider {
     fromPhoneNumberId?: string,
   ): Promise<SendResult>;
 
+  /**
+   * Envía un mensaje de plantilla (obligatorio fuera de la ventana de 24h).
+   * `variables` son los valores posicionales del cuerpo ({{1}}, {{2}}…).
+   */
+  sendTemplate(
+    to: string,
+    templateName: string,
+    language: string,
+    variables: string[],
+    fromPhoneNumberId?: string,
+  ): Promise<SendResult>;
+
   /** Descarga un medio entrante (por su id de Meta) al almacenamiento. */
   downloadMedia(mediaId: string, fromPhoneNumberId?: string): Promise<DownloadedMedia>;
 }

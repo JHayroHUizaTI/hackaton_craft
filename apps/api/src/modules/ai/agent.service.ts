@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { AiSuggestion, Classification } from "@crm/shared";
 import { PrismaService } from "../../infra/prisma/prisma.service";
 import { KnowledgeService } from "../knowledge/knowledge.service";
+import { BotService } from "./bot.service";
 import { LLM_PROVIDER, type LLMProvider } from "./llm.provider";
 import type {
   LlmMessage,
@@ -23,6 +24,7 @@ export class AgentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly knowledge: KnowledgeService,
+    private readonly bots: BotService,
     @Inject(LLM_PROVIDER) private readonly llm: LLMProvider,
   ) {}
 
@@ -37,9 +39,8 @@ export class AgentService {
     const windowOpen =
       !!conversation.windowExpiresAt && conversation.windowExpiresAt > new Date();
 
-    const config =
-      (await this.prisma.agentConfig.findFirst({ where: { isDefault: true } })) ??
-      null;
+    // Bot del canal por el que entró la conversación (o el bot por defecto).
+    const config = await this.bots.resolveForChannel(conversation.channelId);
 
     const system = this.buildSystem(config?.systemPrompt, conversation.contact);
     const messages = await this.buildHistory(conversationId);

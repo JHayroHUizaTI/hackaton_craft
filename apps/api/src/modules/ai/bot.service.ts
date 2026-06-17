@@ -1,0 +1,250 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
+import type {
+  BotChannelRef,
+  BotDto,
+  BusinessHours,
+  CreateBotInput,
+  EscalationRules,
+  KeywordTrigger,
+  UpdateBotInput,
+} from "@crm/shared";
+import { PrismaService } from "../../infra/prisma/prisma.service";
+import { availableTools } from "./tools.registry";
+
+@Injectable()
+export class BotService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  // ── Lectura ──────────────────────────────────────────────────
+  async list(): Promise<{
+    bots: BotDto[];
+    availableTools: ReturnType<typeof availableTools>;
+    channels: BotChannelRef[];
+  }> {
+    const [rows, channels] = await Promise.all([
+      this.prisma.agentConfig.findMany({
+        orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+        include: { channel: true },
+      }),
+      this.prisma.whatsappConnection.findMany({
+        where: { isActive: true },
+        orderBy: { connectedAt: "desc" },
+      }),
+    ]);
+    return {
+      bots: rows.map((r) => this.toDto(r)),
+      availableTools: availableTools(),
+      channels: channels.map((c) => ({
+        id: c.id,
+        label: c.label,
+        displayPhoneNumber: c.displayPhoneNumber,
+      })),
+    };
+  }
+
+  async getById(id: string): Promise<BotDto> {
+    const bot = await this.prisma.agentConfig.findUnique({
+      where: { id },
+      include: { channel: true },
+    });
+    if (!bot) throw new NotFoundException("Bot no encontrado");
+    return this.toDto(bot);
+  }
+
+  /**
+   * Bot que atiende un canal: el asignado a ese channelId (activo) o, si no,
+   * el bot por defecto (global). Devuelve la fila cruda para uso interno
+   * (agente y automatización). null si no hay ninguno activo.
+   */
+  async resolveForChannel(channelId: string | null) {
+    if (channelId) {
+      const own = await this.prisma.agentConfig.findFirst({
+        where: { channelId, isActive: true },
+      });
+      if (own) return own;
+    }
+    return this.prisma.agentConfig.findFirst({
+      where: { isDefault: true, isActive: true },
+    });
+  }
+
+  // ── Escritura ────────────────────────────────────────────────
+  async create(input: CreateBotInput): Promise<BotDto> {
+    await this.assertChannelFree(input.channelId ?? null, null);
+    const bot = await this.prisma.agentConfig.create({
+      data: {
+        name: input.name,
+        model: input.model,
+        effort: input.effort,
+        systemPrompt: input.systemPrompt,
+        enabledTools: input.enabledTools,
+        maxIterations: input.maxIterations,
+        escalationRules: input.escalationRules as unknown as Prisma.InputJsonObject,
+        monthlyTokenBudget: input.monthlyTokenBudget,
+        isActive: input.isActive,
+        channelId: input.channelId,
+        autopilotByDefault: input.autopilotByDefault,
+        welcomeEnabled: input.welcomeEnabled,
+        welcomeMessage: input.welcomeMessage,
+        businessHoursEnabled: input.businessHoursEnabled,
+        businessHours: (input.businessHours ?? undefined) as Prisma.InputJsonValue,
+        keywordTriggers: input.keywordTriggers as unknown as Prisma.InputJsonValue,
+      },
+      include: { channel: true },
+    });
+    return this.toDto(bot);
+  }
+
+  async update(id: string, input: UpdateBotInput): Promise<BotDto> {
+    const existing = await this.prisma.agentConfig.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Bot no encontrado");
+    if (input.channelId !== undefined) {
+      await this.assertChannelFree(input.channelId, id);
+    }
+
+    const bot = await this.prisma.agentConfig.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.effort !== undefined ? { effort: input.effort } : {}),
+        ...(input.systemPrompt !== undefined
+          ? { systemPrompt: input.systemPrompt }
+          : {}),
+        ...(input.enabledTools !== undefined
+          ? { enabledTools: input.enabledTools }
+          : {}),
+        ...(input.maxIterations !== undefined
+          ? { maxIterations: input.maxIterations }
+          : {}),
+        ...(input.escalationRules !== undefined
+          ? {
+              escalationRules:
+                input.escalationRules as unknown as Prisma.InputJsonObject,
+            }
+          : {}),
+        ...(input.monthlyTokenBudget !== undefined
+          ? { monthlyTokenBudget: input.monthlyTokenBudget }
+          : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
+        ...(input.autopilotByDefault !== undefined
+          ? { autopilotByDefault: input.autopilotByDefault }
+          : {}),
+        ...(input.welcomeEnabled !== undefined
+          ? { welcomeEnabled: input.welcomeEnabled }
+          : {}),
+        ...(input.welcomeMessage !== undefined
+          ? { welcomeMessage: input.welcomeMessage }
+          : {}),
+        ...(input.businessHoursEnabled !== undefined
+          ? { businessHoursEnabled: input.businessHoursEnabled }
+          : {}),
+        ...(input.businessHours !== undefined
+          ? {
+              businessHours: (input.businessHours ??
+                undefined) as Prisma.InputJsonValue,
+            }
+          : {}),
+        ...(input.keywordTriggers !== undefined
+          ? {
+              keywordTriggers:
+                input.keywordTriggers as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
+      },
+      include: { channel: true },
+    });
+    return this.toDto(bot);
+  }
+
+  async remove(id: string): Promise<{ ok: true }> {
+    const bot = await this.prisma.agentConfig.findUnique({ where: { id } });
+    if (!bot) throw new NotFoundException("Bot no encontrado");
+    if (bot.isDefault) {
+      throw new BadRequestException(
+        "No puedes eliminar el bot por defecto. Crea otro y reasigna primero.",
+      );
+    }
+    await this.prisma.agentConfig.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // Un canal solo puede tener un bot. Evita el choque de la constraint única.
+  private async assertChannelFree(
+    channelId: string | null,
+    selfId: string | null,
+  ): Promise<void> {
+    if (!channelId) return;
+    const other = await this.prisma.agentConfig.findFirst({
+      where: { channelId, ...(selfId ? { id: { not: selfId } } : {}) },
+      select: { id: true, name: true },
+    });
+    if (other) {
+      throw new BadRequestException(
+        `El canal ya está asignado al bot "${other.name}". Quítalo de ahí primero.`,
+      );
+    }
+  }
+
+  private toDto(c: {
+    id: string;
+    name: string;
+    model: string;
+    effort: string;
+    systemPrompt: string;
+    enabledTools: string[];
+    maxIterations: number;
+    escalationRules: unknown;
+    monthlyTokenBudget: number;
+    isDefault: boolean;
+    isActive: boolean;
+    channelId: string | null;
+    autopilotByDefault: boolean;
+    welcomeEnabled: boolean;
+    welcomeMessage: string | null;
+    businessHoursEnabled: boolean;
+    businessHours: unknown;
+    keywordTriggers: unknown;
+    createdAt: Date;
+    channel?: {
+      id: string;
+      label: string | null;
+      displayPhoneNumber: string | null;
+    } | null;
+  }): BotDto {
+    return {
+      id: c.id,
+      name: c.name,
+      model: c.model,
+      effort: c.effort,
+      systemPrompt: c.systemPrompt,
+      enabledTools: c.enabledTools,
+      maxIterations: c.maxIterations,
+      escalationRules: (c.escalationRules as EscalationRules | null) ?? {},
+      monthlyTokenBudget: c.monthlyTokenBudget,
+      isDefault: c.isDefault,
+      isActive: c.isActive,
+      channelId: c.channelId,
+      channel: c.channel
+        ? {
+            id: c.channel.id,
+            label: c.channel.label,
+            displayPhoneNumber: c.channel.displayPhoneNumber,
+          }
+        : null,
+      autopilotByDefault: c.autopilotByDefault,
+      welcomeEnabled: c.welcomeEnabled,
+      welcomeMessage: c.welcomeMessage,
+      businessHoursEnabled: c.businessHoursEnabled,
+      businessHours: (c.businessHours as BusinessHours | null) ?? null,
+      keywordTriggers: (c.keywordTriggers as KeywordTrigger[] | null) ?? [],
+      createdAt: c.createdAt.toISOString(),
+    };
+  }
+}

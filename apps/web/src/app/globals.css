@@ -1,10 +1,20 @@
 :root {
   --bg: #0b0f17;
   --panel: #131a26;
-  --border: #233047;
+  --panel-2: #0f1726;
+  --border: #223049;
   --text: #e6edf6;
   --muted: #8aa0bd;
   --accent: #25d366;
+  --accent-soft: rgba(37, 211, 102, 0.12);
+
+  --sidebar: #0d121d;
+  --sidebar-hover: #16202f;
+
+  --radius: 10px;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.32);
+  --header-h: 56px;
+  --sidebar-w: 226px;
 }
 
 * {
@@ -22,6 +32,77 @@ body {
 
 a {
   color: var(--accent);
+}
+
+/* ── Navegación lateral (AppShell) ───────────────────────────── */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  position: relative;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.nav-item:hover {
+  background: var(--sidebar-hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--accent-soft);
+  color: #eafff3;
+}
+
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.nav-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.nav-group {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #56688a;
+  padding: 0 12px;
+  margin: 16px 0 6px;
+  font-weight: 600;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.icon-btn:hover {
+  background: var(--sidebar-hover);
+  color: var(--text);
 }
 
 /* Animaciones de carga */
@@ -54,4 +135,18 @@ a {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* Scrollbars sutiles */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f2b40;
+  border-radius: 8px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2b3a55;
 }

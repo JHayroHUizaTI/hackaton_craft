@@ -301,6 +301,7 @@ model Conversation {
   notes         Note[]
   aiRuns        AiRun[]
   aiMessages    AiMessage[]
+  flowSession   FlowSession?
 
   @@index([status])
   @@index([channelId])
@@ -320,6 +321,7 @@ model Message {
   content        String? // texto o caption
   mediaUrl       String?
   templateId     String?
+  campaignId     String? // si el mensaje salió de una campaña/broadcast
   status         MessageStatus    @default(QUEUED)
   // Trazabilidad: si lo generó la IA, enlaza al run que lo produjo.
   aiRunId        String?
@@ -329,10 +331,12 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   template     Template?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  campaign     Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   aiRun        AiRun?       @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([status])
+  @@index([campaignId])
   @@map("messages")
 }
 
@@ -373,11 +377,15 @@ model Template {
 }
 
 model Campaign {
-  id          String         @id @default(cuid())
-  name        String
-  templateId  String
-  status      CampaignStatus @default(DRAFT)
-  scheduledAt DateTime?
+  id             String         @id @default(cuid())
+  name           String
+  templateId     String
+  channelId      String? // número de WhatsApp emisor (multi-número)
+  status         CampaignStatus @default(DRAFT)
+  scheduledAt    DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  variableValues Json? // valores de las variables de la plantilla para este envío
   // Métricas agregadas (también derivables de Message, cacheadas aquí).
   totalRecipients Int        @default(0)
   sentCount       Int        @default(0)
@@ -387,8 +395,10 @@ model Campaign {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  template Template      @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  template Template            @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  channel  WhatsappConnection? @relation(fields: [channelId], references: [id], onDelete: SetNull)
   tags     CampaignTag[] // audiencia: contactos con estas etiquetas
+  messages Message[]
 
   @@index([status])
   @@map("campaigns")
@@ -456,13 +466,29 @@ model AgentConfig {
   maxIterations      Int      @default(6)
   escalationRules    Json? // umbrales: confianza, sentimiento, palabras clave
   monthlyTokenBudget Int      @default(0) // 0 = sin límite
-  isDefault          Boolean  @default(false)
+  isDefault          Boolean  @default(false) // bot global de respaldo
   isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
 
-  runs AiRun[]
+  // ── Asignación a canal (multi-número) ──────────────────────
+  // Si channelId está fijo, este bot atiende ese número de WhatsApp.
+  // Si es null y isDefault, es el bot de respaldo para canales sin bot.
+  channelId String? @unique
 
+  // ── Automatización ─────────────────────────────────────────
+  autopilotByDefault   Boolean @default(false) // conversaciones nuevas arrancan en AUTOPILOT
+  welcomeEnabled       Boolean @default(false)
+  welcomeMessage       String? // saludo automático al primer mensaje
+  businessHoursEnabled Boolean @default(false)
+  businessHours        Json? // { timezone, days, outOfHoursMessage }
+  keywordTriggers      Json? // [{ keywords[], action, value? }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channel WhatsappConnection? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  runs    AiRun[]
+
+  @@index([isActive])
   @@map("agent_configs")
 }
 
@@ -587,7 +613,52 @@ model WhatsappConnection {
   updatedAt          DateTime @updatedAt
 
   conversations Conversation[]
+  bot           AgentConfig?
+  flows         Flow[]
+  campaigns     Campaign[]
 
   @@index([isActive])
   @@map("whatsapp_connections")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Flujos de automatización (constructor visual tipo nodos)
+// ─────────────────────────────────────────────────────────────
+
+// Definición de un flujo: nodos + aristas (formato React Flow) + disparador.
+model Flow {
+  id              String   @id @default(cuid())
+  name            String
+  isActive        Boolean  @default(false)
+  channelId       String? // canal que dispara el flujo (null = cualquiera)
+  triggerType     String   @default("conversation_start") // conversation_start | keyword
+  triggerKeywords String[] // si triggerType = keyword
+  nodes           Json     @default("[]") // [{ id, type, position, data }]
+  edges           Json     @default("[]") // [{ id, source, target, sourceHandle? }]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  channel  WhatsappConnection? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  sessions FlowSession[]
+
+  @@index([isActive])
+  @@map("flows")
+}
+
+// Estado de ejecución de un flujo en una conversación concreta.
+model FlowSession {
+  id             String   @id @default(cuid())
+  conversationId String   @unique
+  flowId         String
+  currentNodeId  String? // nodo donde espera respuesta (askQuestion), o null
+  variables      Json     @default("{}") // respuestas capturadas
+  status         String   @default("running") // running | completed | stopped
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  flow         Flow         @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+  @@map("flow_sessions")
 }

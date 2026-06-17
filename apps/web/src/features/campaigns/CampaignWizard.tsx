@@ -1,0 +1,325 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  variableSources,
+  type CreateCampaignInput,
+  type VariableSource,
+  type VariableValue,
+} from "@crm/shared";
+import {
+  createCampaign,
+  fetchAudiencePreview,
+  fetchCampaignMeta,
+  launchCampaign,
+} from "@/lib/bff";
+import { box, ghostBtn, input, label, primaryBtn } from "./styles";
+
+const SOURCE_LABEL: Record<VariableSource, string> = {
+  static: "Texto fijo",
+  contact_name: "Nombre del contacto",
+  contact_phone: "Teléfono del contacto",
+};
+
+export function CampaignWizard({ onDone }: { onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const { data: meta } = useQuery({
+    queryKey: ["campaign-meta"],
+    queryFn: fetchCampaignMeta,
+  });
+
+  const [name, setName] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [varValues, setVarValues] = useState<Record<number, VariableValue>>({});
+  const [schedule, setSchedule] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
+
+  const template = meta?.templates.find((t) => t.id === templateId) ?? null;
+
+  // Audiencia en vivo según las etiquetas elegidas.
+  const { data: audience } = useQuery({
+    queryKey: ["audience", tagIds],
+    queryFn: () => fetchAudiencePreview(tagIds),
+  });
+
+  // Inicializa los valores de variables al elegir plantilla.
+  useEffect(() => {
+    if (!template) return;
+    setVarValues((prev) => {
+      const next: Record<number, VariableValue> = {};
+      for (const v of template.variables) {
+        next[v.index] = prev[v.index] ?? { index: v.index, source: "static", value: "" };
+      }
+      return next;
+    });
+  }, [template]);
+
+  const variableValues = useMemo(
+    () => (template ? template.variables.map((v) => varValues[v.index]).filter(Boolean) : []),
+    [template, varValues],
+  );
+
+  const create = useMutation({
+    mutationFn: async (launch: boolean) => {
+      const payload: CreateCampaignInput = {
+        name,
+        templateId,
+        channelId,
+        tagIds,
+        variableValues,
+        scheduledAt: schedule && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      };
+      const campaign = await createCampaign(payload);
+      if (launch) await launchCampaign(campaign.id);
+      return campaign;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      onDone();
+    },
+  });
+
+  const canSave = !!name && !!templateId;
+
+  function toggleTag(id: string) {
+    setTagIds((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+  }
+  function setVar(index: number, patch: Partial<VariableValue>) {
+    setVarValues((v) => ({ ...v, [index]: { ...v[index]!, ...patch, index } }));
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+        {/* 1. Básico */}
+        <section style={box}>
+          <SecTitle n={1}>Nombre y plantilla</SecTitle>
+          <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={label}>Nombre de la campaña</div>
+              <input
+                style={input}
+                value={name}
+                placeholder="Promo de septiembre"
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={label}>Plantilla</div>
+              <select style={input} value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+                <option value="">Elige una plantilla…</option>
+                {(meta?.templates ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.language})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {template && (
+            <div style={{ marginTop: 10, padding: 12, background: "#0d1320", borderRadius: 8, color: "var(--muted)", fontSize: 13, whiteSpace: "pre-wrap" }}>
+              {template.body}
+            </div>
+          )}
+        </section>
+
+        {/* 2. Audiencia */}
+        <section style={box}>
+          <SecTitle n={2}>Audiencia</SecTitle>
+          <div style={{ ...label, marginTop: 10 }}>
+            Etiquetas (sin seleccionar = todos los contactos con opt-in)
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {(meta?.tags ?? []).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => toggleTag(t.id)}
+                style={{
+                  ...ghostBtn,
+                  borderColor: tagIds.includes(t.id) ? "var(--accent)" : "var(--border)",
+                  color: tagIds.includes(t.id) ? "var(--text)" : "var(--muted)",
+                  background: tagIds.includes(t.id) ? "#10243a" : "transparent",
+                }}
+              >
+                {t.name} · {t.contactCount}
+              </button>
+            ))}
+            {meta && meta.tags.length === 0 && (
+              <span style={{ color: "var(--muted)", fontSize: 13 }}>
+                No hay etiquetas; se enviará a todos los contactos con opt-in.
+              </span>
+            )}
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <div style={label}>Número emisor</div>
+            <select
+              style={{ ...input, maxWidth: 280 }}
+              value={channelId ?? ""}
+              onChange={(e) => setChannelId(e.target.value || null)}
+            >
+              <option value="">Número por defecto</option>
+              {(meta?.channels ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label ?? c.displayPhoneNumber ?? c.id}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+
+        {/* 3. Variables */}
+        {template && template.variables.length > 0 && (
+          <section style={box}>
+            <SecTitle n={3}>Variables de la plantilla</SecTitle>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+              {template.variables.map((v) => {
+                const val = varValues[v.index];
+                return (
+                  <div key={v.index} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <code style={{ width: 44, color: "var(--accent)" }}>{`{{${v.index}}}`}</code>
+                    <select
+                      style={{ ...input, width: 200 }}
+                      value={val?.source ?? "static"}
+                      onChange={(e) => setVar(v.index, { source: e.target.value as VariableSource })}
+                    >
+                      {variableSources.map((s) => (
+                        <option key={s} value={s}>
+                          {SOURCE_LABEL[s]}
+                        </option>
+                      ))}
+                    </select>
+                    {val?.source === "static" && (
+                      <input
+                        style={input}
+                        value={val.value ?? ""}
+                        placeholder="Texto…"
+                        onChange={(e) => setVar(v.index, { value: e.target.value })}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* 4. Programación */}
+        <section style={box}>
+          <SecTitle n={4}>Cuándo enviar</SecTitle>
+          <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+            <label style={radioRow}>
+              <input type="radio" checked={!schedule} onChange={() => setSchedule(false)} />
+              Enviar ahora
+            </label>
+            <label style={radioRow}>
+              <input type="radio" checked={schedule} onChange={() => setSchedule(true)} />
+              Programar
+            </label>
+            {schedule && (
+              <input
+                type="datetime-local"
+                style={{ ...input, width: 230 }}
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+              />
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* Resumen */}
+      <aside style={{ ...box, width: 280, flexShrink: 0, position: "sticky", top: 20 }}>
+        <strong>Resumen</strong>
+        <Summary label="Campaña" value={name || "—"} />
+        <Summary label="Plantilla" value={template?.name ?? "—"} />
+        <Summary
+          label="Destinatarios"
+          value={audience ? `${audience.count} contactos` : "…"}
+          highlight
+        />
+        <Summary
+          label="Envío"
+          value={schedule ? (scheduledAt ? new Date(scheduledAt).toLocaleString() : "programar") : "ahora"}
+        />
+        {create.isError && (
+          <p style={{ color: "#ff6b6b", fontSize: 13 }}>{(create.error as Error).message}</p>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+          <button
+            onClick={() => create.mutate(true)}
+            disabled={!canSave || create.isPending}
+            style={primaryBtn}
+          >
+            {create.isPending
+              ? "Procesando…"
+              : schedule
+                ? "Programar envío"
+                : "Crear y enviar"}
+          </button>
+          <button
+            onClick={() => create.mutate(false)}
+            disabled={!canSave || create.isPending}
+            style={ghostBtn}
+          >
+            Guardar borrador
+          </button>
+          <button onClick={onDone} style={ghostBtn}>
+            Cancelar
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function SecTitle({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={stepDot}>{n}</span>
+      <strong style={{ fontSize: 15 }}>{children}</strong>
+    </div>
+  );
+}
+
+function Summary({
+  label: l,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 12, color: "var(--muted)" }}>{l}</div>
+      <div style={{ fontSize: highlight ? 18 : 14, fontWeight: highlight ? 700 : 500, color: highlight ? "#7ee2a8" : "var(--text)" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+const stepDot: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  borderRadius: "50%",
+  background: "var(--accent)",
+  color: "#04210f",
+  fontSize: 12,
+  fontWeight: 700,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const radioRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  fontSize: 14,
+  cursor: "pointer",
+};

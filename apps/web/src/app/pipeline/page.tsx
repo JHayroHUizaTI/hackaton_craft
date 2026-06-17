@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { TopNav } from "@/components/TopNav";
+import { AppShell } from "@/components/AppShell";
 import { KanbanBoard } from "@/features/pipeline/KanbanBoard";
 
 export default async function PipelinePage() {
@@ -9,9 +9,8 @@ export default async function PipelinePage() {
   const role = (session.user as { role?: string })?.role;
 
   return (
-    <>
-      <TopNav email={session.user?.email ?? ""} role={role} active="pipeline" />
+    <AppShell email={session.user?.email ?? ""} role={role} active="pipeline">
       <KanbanBoard />
-    </>
+    </AppShell>
   );
 }

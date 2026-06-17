@@ -1,0 +1,208 @@
+import { Injectable, Logger } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
+import {
+  AiMode,
+  ConversationStatus,
+  MessageAuthor,
+  MessageType,
+  type BusinessHours,
+  type KeywordTrigger,
+  type Weekday,
+} from "@crm/shared";
+import { PrismaService } from "../../infra/prisma/prisma.service";
+import { MessagingService } from "../messaging/messaging.service";
+import { BotService } from "./bot.service";
+import { AutopilotService } from "./autopilot.service";
+import { FlowEngineService } from "./flow-engine.service";
+
+// getDay(): 0=domingo … 6=sábado.
+const WEEKDAYS: Weekday[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/**
+ * Reglas de automatización que se ejecutan ALREDEDOR del agente IA:
+ *  - al crear conversación: bienvenida + arranque en autopilot,
+ *  - en cada entrante: disparadores por palabra clave + horario de atención,
+ *  - y si nada de eso aplica, delega al autopilot.
+ * Es el único listener de `conversation.inbound` (llama a AutopilotService).
+ */
+@Injectable()
+export class AutomationService {
+  private readonly logger = new Logger("Automation");
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly bots: BotService,
+    private readonly messaging: MessagingService,
+    private readonly autopilot: AutopilotService,
+    private readonly flows: FlowEngineService,
+  ) {}
+
+  // ── Conversación nueva: bienvenida + autopilot por defecto ──
+  @OnEvent("conversation.created")
+  async onCreated(payload: { conversationId: string }): Promise<void> {
+    const { conversationId } = payload;
+    try {
+      const convo = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: { contact: true },
+      });
+      if (!convo || !convo.contact.optIn) return;
+
+      // Un flujo "al iniciar conversación" tiene prioridad sobre el bot.
+      if (await this.flows.onCreated(conversationId)) return;
+
+      const bot = await this.bots.resolveForChannel(convo.channelId);
+      if (!bot) return;
+
+      if (bot.autopilotByDefault && convo.aiMode !== AiMode.AUTOPILOT) {
+        await this.messaging.setAiMode(conversationId, AiMode.AUTOPILOT);
+      }
+
+      if (bot.welcomeEnabled && bot.welcomeMessage?.trim()) {
+        await this.messaging.queueOutbound(
+          {
+            conversationId,
+            type: MessageType.TEXT,
+            text: bot.welcomeMessage.trim(),
+          },
+          MessageAuthor.AI,
+        );
+        this.logger.log(`Bienvenida enviada en ${conversationId}`);
+      }
+    } catch (e) {
+      this.logger.error(
+        `onCreated falló en ${conversationId}: ${(e as Error).message}`,
+      );
+    }
+  }
+
+  // ── Entrante: palabras clave → horario → autopilot ──────────
+  @OnEvent("conversation.inbound")
+  async onInbound(payload: { conversationId: string }): Promise<void> {
+    const { conversationId } = payload;
+    try {
+      const convo = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: { contact: true },
+      });
+      if (!convo || !convo.contact.optIn) return;
+
+      // Prioridad máxima: si hay un flujo activo/disparado, lo maneja el motor.
+      if (await this.flows.onInbound(conversationId)) return;
+
+      const bot = await this.bots.resolveForChannel(convo.channelId);
+
+      // Último texto entrante del contacto.
+      const lastInbound = await this.prisma.message.findFirst({
+        where: { conversationId, direction: "INBOUND" },
+        orderBy: { createdAt: "desc" },
+      });
+      const text = (lastInbound?.content ?? "").toLowerCase();
+
+      // 1) Disparadores por palabra clave (tienen prioridad).
+      if (bot && text) {
+        const triggers = (bot.keywordTriggers as KeywordTrigger[] | null) ?? [];
+        const hit = triggers.find((t) =>
+          t.keywords.some((k) => text.includes(k.toLowerCase())),
+        );
+        if (hit) {
+          await this.applyTrigger(conversationId, hit);
+          this.logger.log(`Disparador "${hit.action}" en ${conversationId}`);
+          return; // el disparador resuelve el turno
+        }
+      }
+
+      // 2) Horario de atención.
+      if (bot?.businessHoursEnabled && bot.businessHours) {
+        const hours = bot.businessHours as BusinessHours;
+        if (!this.isWithinHours(hours)) {
+          if (hours.outOfHoursMessage?.trim()) {
+            await this.messaging.queueOutbound(
+              {
+                conversationId,
+                type: MessageType.TEXT,
+                text: hours.outOfHoursMessage.trim(),
+              },
+              MessageAuthor.AI,
+            );
+          }
+          if (convo.status !== ConversationStatus.PENDING) {
+            await this.messaging.setStatus(
+              conversationId,
+              ConversationStatus.PENDING,
+            );
+          }
+          this.logger.log(`Fuera de horario en ${conversationId}`);
+          return;
+        }
+      }
+
+      // Evitar doble mensaje: si la bienvenida está activa y este es el primer
+      // entrante, ya respondió el saludo; el autopilot entra desde el 2º mensaje.
+      if (bot?.welcomeEnabled && bot.welcomeMessage?.trim()) {
+        const inboundCount = await this.prisma.message.count({
+          where: { conversationId, direction: "INBOUND" },
+        });
+        if (inboundCount <= 1) return;
+      }
+
+      // 3) Autopilot normal (el servicio aplica sus propios guardrails).
+      await this.autopilot.run(conversationId);
+    } catch (e) {
+      this.logger.error(
+        `onInbound falló en ${conversationId}: ${(e as Error).message}`,
+      );
+    }
+  }
+
+  // ── Acción de un disparador por palabra clave ───────────────
+  private async applyTrigger(
+    conversationId: string,
+    trigger: KeywordTrigger,
+  ): Promise<void> {
+    if (trigger.action === "reply" && trigger.value?.trim()) {
+      await this.messaging.queueOutbound(
+        { conversationId, type: MessageType.TEXT, text: trigger.value.trim() },
+        MessageAuthor.AI,
+      );
+    } else if (trigger.action === "handoff") {
+      await this.messaging.setStatus(
+        conversationId,
+        ConversationStatus.PENDING,
+      );
+    } else if (trigger.action === "set_off") {
+      await this.messaging.setAiMode(conversationId, AiMode.OFF);
+    }
+  }
+
+  // ── Horario: ¿la hora actual cae dentro del rango del día? ──
+  private isWithinHours(hours: BusinessHours): boolean {
+    const tz = hours.timezone || "America/Lima";
+    let parts: Intl.DateTimeFormatPart[];
+    try {
+      parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(new Date());
+    } catch {
+      // Zona horaria inválida: no bloquear, asumir dentro de horario.
+      return true;
+    }
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    // Día actual en la zona horaria.
+    const now = new Date(
+      new Date().toLocaleString("en-US", { timeZone: tz }),
+    );
+    const day = WEEKDAYS[now.getDay()]!;
+    const range = hours.days?.[day];
+    if (!range) return false; // día cerrado
+
+    const hh = get("hour").padStart(2, "0");
+    const mm = get("minute").padStart(2, "0");
+    const cur = `${hh}:${mm}`;
+    return cur >= range.from && cur <= range.to;
+  }
+}

@@ -1,5 +1,4 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { OnEvent } from "@nestjs/event-emitter";
 import {
   AiMode,
   ConversationStatus,
@@ -28,9 +27,11 @@ export class AutopilotService {
     private readonly messaging: MessagingService,
   ) {}
 
-  @OnEvent("conversation.inbound")
-  async onInbound(payload: { conversationId: string }): Promise<void> {
-    const { conversationId } = payload;
+  /**
+   * Ejecuta el agente en autopilot para una conversación. Lo invoca
+   * AutomationService tras pasar sus reglas (palabras clave, horario).
+   */
+  async run(conversationId: string): Promise<void> {
     try {
       const convo = await this.prisma.conversation.findUnique({
         where: { id: conversationId },

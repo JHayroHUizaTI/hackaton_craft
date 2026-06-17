@@ -1,0 +1,635 @@
+"use client";
+
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  effortValues,
+  keywordActions,
+  weekday,
+  type AgentToolInfo,
+  type BotChannelRef,
+  type BotDto,
+  type BusinessHours,
+  type CreateBotInput,
+  type KeywordAction,
+  type KeywordTrigger,
+  type Weekday,
+} from "@crm/shared";
+import { createBot, updateBot } from "@/lib/bff";
+import { box, field, input, label as lbl, primaryBtn, ghostBtn, toggle } from "./styles";
+
+const MODELS = [
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+];
+
+const WEEKDAY_LABEL: Record<Weekday, string> = {
+  mon: "Lunes",
+  tue: "Martes",
+  wed: "Miércoles",
+  thu: "Jueves",
+  fri: "Viernes",
+  sat: "Sábado",
+  sun: "Domingo",
+};
+
+const ACTION_LABEL: Record<KeywordAction, string> = {
+  reply: "Responder texto",
+  handoff: "Pasar a humano",
+  set_off: "Apagar IA",
+};
+
+type Form = {
+  name: string;
+  model: string;
+  effort: string;
+  systemPrompt: string;
+  enabledTools: string[];
+  maxIterations: number;
+  monthlyTokenBudget: number;
+  isActive: boolean;
+  channelId: string | null;
+  escalateOnNegativeSentiment: boolean;
+  minConfidence: number;
+  keywords: string;
+  autopilotByDefault: boolean;
+  welcomeEnabled: boolean;
+  welcomeMessage: string;
+  businessHoursEnabled: boolean;
+  businessHours: BusinessHours;
+  keywordTriggers: KeywordTrigger[];
+};
+
+function defaultHours(): BusinessHours {
+  return {
+    timezone: "America/Lima",
+    days: {
+      mon: { from: "09:00", to: "18:00" },
+      tue: { from: "09:00", to: "18:00" },
+      wed: { from: "09:00", to: "18:00" },
+      thu: { from: "09:00", to: "18:00" },
+      fri: { from: "09:00", to: "18:00" },
+      sat: null,
+      sun: null,
+    },
+    outOfHoursMessage:
+      "¡Gracias por escribirnos! Ahora estamos fuera de horario, te responderemos pronto.",
+  };
+}
+
+function toForm(bot: BotDto | null): Form {
+  if (!bot) {
+    return {
+      name: "",
+      model: "claude-opus-4-8",
+      effort: "medium",
+      systemPrompt:
+        "Eres un asistente de atención al cliente por WhatsApp. Responde en español, con tono cercano y profesional.",
+      enabledTools: ["search_contact", "handoff_to_human"],
+      maxIterations: 6,
+      monthlyTokenBudget: 0,
+      isActive: true,
+      channelId: null,
+      escalateOnNegativeSentiment: true,
+      minConfidence: 0.6,
+      keywords: "humano, agente, reclamo",
+      autopilotByDefault: false,
+      welcomeEnabled: false,
+      welcomeMessage: "¡Hola! 👋 Gracias por escribirnos. ¿En qué te ayudamos?",
+      businessHoursEnabled: false,
+      businessHours: defaultHours(),
+      keywordTriggers: [],
+    };
+  }
+  return {
+    name: bot.name,
+    model: bot.model,
+    effort: bot.effort,
+    systemPrompt: bot.systemPrompt,
+    enabledTools: bot.enabledTools,
+    maxIterations: bot.maxIterations,
+    monthlyTokenBudget: bot.monthlyTokenBudget,
+    isActive: bot.isActive,
+    channelId: bot.channelId,
+    escalateOnNegativeSentiment:
+      bot.escalationRules.escalateOnNegativeSentiment ?? false,
+    minConfidence: bot.escalationRules.minConfidence ?? 0.6,
+    keywords: (bot.escalationRules.keywords ?? []).join(", "),
+    autopilotByDefault: bot.autopilotByDefault,
+    welcomeEnabled: bot.welcomeEnabled,
+    welcomeMessage: bot.welcomeMessage ?? "",
+    businessHoursEnabled: bot.businessHoursEnabled,
+    businessHours: bot.businessHours ?? defaultHours(),
+    keywordTriggers: bot.keywordTriggers,
+  };
+}
+
+export function BotEditor({
+  bot,
+  availableTools,
+  channels,
+  onSaved,
+  onCancel,
+  onDeleted,
+}: {
+  bot: BotDto | null; // null = crear nuevo
+  availableTools: AgentToolInfo[];
+  channels: BotChannelRef[];
+  onSaved: (b: BotDto) => void;
+  onCancel: () => void;
+  onDeleted?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<Form>(() => toForm(bot));
+  const isNew = !bot;
+
+  const set = <K extends keyof Form>(k: K, v: Form[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const payload: CreateBotInput = {
+        name: form.name,
+        model: form.model,
+        effort: form.effort as CreateBotInput["effort"],
+        systemPrompt: form.systemPrompt,
+        enabledTools: form.enabledTools,
+        maxIterations: Number(form.maxIterations),
+        monthlyTokenBudget: Number(form.monthlyTokenBudget),
+        isActive: form.isActive,
+        channelId: form.channelId,
+        autopilotByDefault: form.autopilotByDefault,
+        welcomeEnabled: form.welcomeEnabled,
+        welcomeMessage: form.welcomeMessage.trim() || null,
+        businessHoursEnabled: form.businessHoursEnabled,
+        businessHours: form.businessHoursEnabled ? form.businessHours : null,
+        keywordTriggers: form.keywordTriggers.filter(
+          (t) => t.keywords.length > 0,
+        ),
+        escalationRules: {
+          escalateOnNegativeSentiment: form.escalateOnNegativeSentiment,
+          minConfidence: Number(form.minConfidence),
+          keywords: form.keywords
+            .split(",")
+            .map((k) => k.trim())
+            .filter(Boolean),
+        },
+      };
+      return isNew ? createBot(payload) : updateBot(bot!.id, payload);
+    },
+    onSuccess: (b) => {
+      queryClient.invalidateQueries({ queryKey: ["bots"] });
+      onSaved(b);
+    },
+  });
+
+  function toggleTool(name: string) {
+    set(
+      "enabledTools",
+      form.enabledTools.includes(name)
+        ? form.enabledTools.filter((t) => t !== name)
+        : [...form.enabledTools, name],
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Identidad */}
+      <div style={box}>
+        <SectionTitle>Identidad</SectionTitle>
+        <div style={field}>
+          <span style={lbl}>Nombre del bot</span>
+          <input
+            style={input}
+            value={form.name}
+            placeholder="Bot de Ventas"
+            onChange={(e) => set("name", e.target.value)}
+          />
+        </div>
+        <div style={field}>
+          <span style={lbl}>Número de WhatsApp que atiende</span>
+          <select
+            style={input}
+            value={form.channelId ?? ""}
+            onChange={(e) => set("channelId", e.target.value || null)}
+          >
+            <option value="">Cualquiera (bot por defecto)</option>
+            {channels.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label ?? c.displayPhoneNumber ?? c.id}
+              </option>
+            ))}
+          </select>
+        </div>
+        <label style={toggle}>
+          <input
+            type="checkbox"
+            checked={form.isActive}
+            onChange={(e) => set("isActive", e.target.checked)}
+          />
+          Bot activo
+        </label>
+      </div>
+
+      {/* Modelo */}
+      <div style={box}>
+        <SectionTitle>Modelo</SectionTitle>
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ ...field, flex: 1 }}>
+            <span style={lbl}>Modelo</span>
+            <select
+              style={input}
+              value={form.model}
+              onChange={(e) => set("model", e.target.value)}
+            >
+              {MODELS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ ...field, width: 140 }}>
+            <span style={lbl}>Effort</span>
+            <select
+              style={input}
+              value={form.effort}
+              onChange={(e) => set("effort", e.target.value)}
+            >
+              {effortValues.map((ef) => (
+                <option key={ef} value={ef}>
+                  {ef}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div style={field}>
+          <span style={lbl}>System prompt (personalidad e instrucciones)</span>
+          <textarea
+            style={{ ...input, minHeight: 150, resize: "vertical", fontFamily: "inherit" }}
+            value={form.systemPrompt}
+            onChange={(e) => set("systemPrompt", e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Herramientas */}
+      <div style={box}>
+        <SectionTitle>Herramientas</SectionTitle>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {availableTools.map((t) => (
+            <label key={t.name} style={toolRow}>
+              <input
+                type="checkbox"
+                checked={form.enabledTools.includes(t.name)}
+                onChange={() => toggleTool(t.name)}
+              />
+              <span>
+                <code style={{ color: "var(--accent)" }}>{t.name}</code>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  {t.description}
+                </div>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Automatización */}
+      <div style={box}>
+        <SectionTitle>Automatización</SectionTitle>
+
+        <label style={toggle}>
+          <input
+            type="checkbox"
+            checked={form.autopilotByDefault}
+            onChange={(e) => set("autopilotByDefault", e.target.checked)}
+          />
+          <span>
+            <strong>Arrancar en autopilot</strong>
+            <div style={hint}>
+              Las conversaciones nuevas de este número empiezan respondiendo la
+              IA sola.
+            </div>
+          </span>
+        </label>
+
+        <div style={divider} />
+
+        <label style={toggle}>
+          <input
+            type="checkbox"
+            checked={form.welcomeEnabled}
+            onChange={(e) => set("welcomeEnabled", e.target.checked)}
+          />
+          <span>
+            <strong>Mensaje de bienvenida</strong>
+            <div style={hint}>Saludo automático al primer mensaje (sin IA).</div>
+          </span>
+        </label>
+        {form.welcomeEnabled && (
+          <textarea
+            style={{ ...input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }}
+            value={form.welcomeMessage}
+            onChange={(e) => set("welcomeMessage", e.target.value)}
+            placeholder="¡Hola! Gracias por escribirnos…"
+          />
+        )}
+
+        <div style={divider} />
+
+        <label style={toggle}>
+          <input
+            type="checkbox"
+            checked={form.businessHoursEnabled}
+            onChange={(e) => set("businessHoursEnabled", e.target.checked)}
+          />
+          <span>
+            <strong>Horario de atención</strong>
+            <div style={hint}>
+              Fuera de horario responde un mensaje y deja la conversación
+              pendiente (no activa la IA).
+            </div>
+          </span>
+        </label>
+        {form.businessHoursEnabled && (
+          <BusinessHoursEditor
+            value={form.businessHours}
+            onChange={(h) => set("businessHours", h)}
+          />
+        )}
+
+        <div style={divider} />
+
+        <div>
+          <strong style={{ fontSize: 14 }}>Disparadores por palabra clave</strong>
+          <div style={hint}>
+            Si el mensaje contiene una palabra, ejecuta una acción antes que la
+            IA.
+          </div>
+          <KeywordTriggersEditor
+            value={form.keywordTriggers}
+            onChange={(t) => set("keywordTriggers", t)}
+          />
+        </div>
+      </div>
+
+      {/* Escalado y límites */}
+      <div style={box}>
+        <SectionTitle>Escalado y límites</SectionTitle>
+        <label style={toggle}>
+          <input
+            type="checkbox"
+            checked={form.escalateOnNegativeSentiment}
+            onChange={(e) =>
+              set("escalateOnNegativeSentiment", e.target.checked)
+            }
+          />
+          Escalar si el sentimiento es negativo
+        </label>
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ ...field, flex: 1 }}>
+            <span style={lbl}>Confianza mínima (0–1)</span>
+            <input
+              type="number"
+              step="0.05"
+              min={0}
+              max={1}
+              style={input}
+              value={form.minConfidence}
+              onChange={(e) => set("minConfidence", Number(e.target.value))}
+            />
+          </div>
+          <div style={{ ...field, flex: 1 }}>
+            <span style={lbl}>Máx. iteraciones</span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              style={input}
+              value={form.maxIterations}
+              onChange={(e) => set("maxIterations", Number(e.target.value))}
+            />
+          </div>
+        </div>
+        <div style={field}>
+          <span style={lbl}>Palabras de escalado (separadas por coma)</span>
+          <input
+            style={input}
+            value={form.keywords}
+            onChange={(e) => set("keywords", e.target.value)}
+            placeholder="humano, reclamo, agente"
+          />
+        </div>
+        <div style={field}>
+          <span style={lbl}>Presupuesto de tokens / mes (0 = sin límite)</span>
+          <input
+            type="number"
+            min={0}
+            style={input}
+            value={form.monthlyTokenBudget}
+            onChange={(e) => set("monthlyTokenBudget", Number(e.target.value))}
+          />
+        </div>
+      </div>
+
+      {/* Acciones */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {!isNew && onDeleted && !bot?.isDefault && (
+          <button onClick={onDeleted} style={{ ...ghostBtn, color: "#e08a8a", borderColor: "#5a2a2a" }}>
+            Eliminar
+          </button>
+        )}
+        <div style={{ flex: 1 }} />
+        {save.isError && (
+          <span style={{ color: "#ff6b6b", fontSize: 13 }}>
+            {(save.error as Error).message}
+          </span>
+        )}
+        <button onClick={onCancel} style={ghostBtn}>
+          Cancelar
+        </button>
+        <button
+          onClick={() => save.mutate()}
+          disabled={save.isPending || !form.name.trim()}
+          style={primaryBtn}
+        >
+          {save.isPending ? "Guardando…" : isNew ? "Crear bot" : "Guardar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BusinessHoursEditor({
+  value,
+  onChange,
+}: {
+  value: BusinessHours;
+  onChange: (h: BusinessHours) => void;
+}) {
+  function setDay(d: Weekday, range: { from: string; to: string } | null) {
+    onChange({ ...value, days: { ...value.days, [d]: range } });
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+      <div style={field}>
+        <span style={lbl}>Zona horaria</span>
+        <input
+          style={input}
+          value={value.timezone}
+          onChange={(e) => onChange({ ...value, timezone: e.target.value })}
+          placeholder="America/Lima"
+        />
+      </div>
+      {weekday.map((d) => {
+        const range = value.days?.[d] ?? null;
+        const openDay = !!range;
+        return (
+          <div key={d} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, width: 120 }}>
+              <input
+                type="checkbox"
+                checked={openDay}
+                onChange={(e) =>
+                  setDay(d, e.target.checked ? { from: "09:00", to: "18:00" } : null)
+                }
+              />
+              {WEEKDAY_LABEL[d]}
+            </label>
+            {openDay && range && (
+              <>
+                <input
+                  type="time"
+                  style={{ ...input, width: 110 }}
+                  value={range.from}
+                  onChange={(e) => setDay(d, { ...range, from: e.target.value })}
+                />
+                <span style={{ color: "var(--muted)" }}>–</span>
+                <input
+                  type="time"
+                  style={{ ...input, width: 110 }}
+                  value={range.to}
+                  onChange={(e) => setDay(d, { ...range, to: e.target.value })}
+                />
+              </>
+            )}
+            {!openDay && (
+              <span style={{ color: "var(--muted)", fontSize: 13 }}>Cerrado</span>
+            )}
+          </div>
+        );
+      })}
+      <div style={field}>
+        <span style={lbl}>Mensaje fuera de horario</span>
+        <textarea
+          style={{ ...input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }}
+          value={value.outOfHoursMessage ?? ""}
+          onChange={(e) =>
+            onChange({ ...value, outOfHoursMessage: e.target.value })
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function KeywordTriggersEditor({
+  value,
+  onChange,
+}: {
+  value: KeywordTrigger[];
+  onChange: (t: KeywordTrigger[]) => void;
+}) {
+  function update(i: number, patch: Partial<KeywordTrigger>) {
+    onChange(value.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+      {value.map((t, i) => (
+        <div key={i} style={{ ...box, gap: 8, padding: 12 }}>
+          <input
+            style={input}
+            value={t.keywords.join(", ")}
+            placeholder="precio, costo, cuánto cuesta"
+            onChange={(e) =>
+              update(i, {
+                keywords: e.target.value
+                  .split(",")
+                  .map((k) => k.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <select
+              style={{ ...input, flex: 1 }}
+              value={t.action}
+              onChange={(e) =>
+                update(i, { action: e.target.value as KeywordAction })
+              }
+            >
+              {keywordActions.map((a) => (
+                <option key={a} value={a}>
+                  {ACTION_LABEL[a]}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+              style={{ ...ghostBtn, color: "#e08a8a", borderColor: "#5a2a2a" }}
+            >
+              ✕
+            </button>
+          </div>
+          {t.action === "reply" && (
+            <textarea
+              style={{ ...input, minHeight: 50, resize: "vertical", fontFamily: "inherit" }}
+              value={t.value ?? ""}
+              placeholder="Texto que se responde automáticamente…"
+              onChange={(e) => update(i, { value: e.target.value })}
+            />
+          )}
+        </div>
+      ))}
+      <button
+        onClick={() =>
+          onChange([...value, { keywords: [], action: "reply", value: "" }])
+        }
+        style={ghostBtn}
+      >
+        + Añadir disparador
+      </button>
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{children}</div>
+  );
+}
+
+const toolRow: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "flex-start",
+  padding: "8px 10px",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+};
+
+const hint: React.CSSProperties = {
+  color: "var(--muted)",
+  fontSize: 12,
+  marginTop: 2,
+};
+
+const divider: React.CSSProperties = {
+  height: 1,
+  background: "var(--border)",
+  margin: "4px 0",
+};

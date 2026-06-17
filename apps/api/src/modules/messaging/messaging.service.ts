@@ -105,6 +105,7 @@ export class MessagingService {
       orderBy: { createdAt: "desc" },
     });
     const windowExpiresAt = new Date(now.getTime() + WINDOW_MS);
+    const isNewConversation = !open;
     const conversation = open
       ? await this.prisma.conversation.update({
           where: { id: open.id },
@@ -143,8 +144,15 @@ export class MessagingService {
       `← ${msg.from}: "${msg.text ?? msg.type}"${optOut ? " [OPT-OUT]" : ""}`,
     );
     this.notify(conversation.id);
-    // Disparar el agente IA si la conversación está en autopilot (lo maneja
-    // AutopilotService de forma asíncrona, con sus propios guardrails).
+    // Conversación nueva: dispara la automatización de bienvenida / autopilot
+    // por defecto (AutomationService) antes del flujo normal de entrante.
+    if (isNewConversation) {
+      this.events.emit("conversation.created", {
+        conversationId: conversation.id,
+      });
+    }
+    // Disparar la automatización de IA (palabras clave, horario, autopilot).
+    // Lo maneja AutomationService de forma asíncrona con sus guardrails.
     this.events.emit("conversation.inbound", { conversationId: conversation.id });
   }
 
@@ -152,13 +160,30 @@ export class MessagingService {
   async handleStatus(waMessageId: string, status: MessageStatus): Promise<void> {
     const msg = await this.prisma.message.findUnique({
       where: { waMessageId },
-      select: { conversationId: true },
+      select: { conversationId: true, campaignId: true, status: true },
     });
     if (!msg) return;
     await this.prisma.message.update({
       where: { waMessageId },
       data: { status },
     });
+    // Métricas de campaña: acumula entregados/leídos/fallidos.
+    if (msg.campaignId && msg.status !== status) {
+      const field =
+        status === MessageStatus.DELIVERED
+          ? "deliveredCount"
+          : status === MessageStatus.READ
+            ? "readCount"
+            : status === MessageStatus.FAILED
+              ? "failedCount"
+              : null;
+      if (field) {
+        await this.prisma.campaign.update({
+          where: { id: msg.campaignId },
+          data: { [field]: { increment: 1 } },
+        });
+      }
+    }
     this.notify(msg.conversationId);
   }
 

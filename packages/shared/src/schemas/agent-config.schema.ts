@@ -18,7 +18,36 @@ export const agentToolInfoSchema = z.object({
 });
 export type AgentToolInfo = z.infer<typeof agentToolInfoSchema>;
 
-// Configuración del agente que devuelve la API.
+// ── Automatización ───────────────────────────────────────────
+
+// Horario de atención (por día de la semana, formato "HH:MM").
+export const weekday = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type Weekday = (typeof weekday)[number];
+
+export const businessHoursSchema = z.object({
+  timezone: z.string().default("America/Lima"),
+  // Para cada día: rango activo, o null si cerrado.
+  days: z.record(
+    z.enum(weekday),
+    z.object({ from: z.string(), to: z.string() }).nullable(),
+  ),
+  outOfHoursMessage: z.string().max(1000).optional(),
+});
+export type BusinessHours = z.infer<typeof businessHoursSchema>;
+
+// Disparador por palabra clave.
+export const keywordActions = ["reply", "handoff", "set_off"] as const;
+export type KeywordAction = (typeof keywordActions)[number];
+
+export const keywordTriggerSchema = z.object({
+  keywords: z.array(z.string().min(1)).min(1),
+  action: z.enum(keywordActions),
+  // Texto a responder (action="reply") o motivo del handoff.
+  value: z.string().max(2000).optional(),
+});
+export type KeywordTrigger = z.infer<typeof keywordTriggerSchema>;
+
+// Configuración del agente que devuelve la API (compat: bot por defecto).
 export const agentConfigSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -45,3 +74,109 @@ export const updateAgentConfigSchema = z.object({
   monthlyTokenBudget: z.number().int().min(0).optional(),
 });
 export type UpdateAgentConfigInput = z.infer<typeof updateAgentConfigSchema>;
+
+// ── Bots (CRUD completo, multi-bot) ──────────────────────────
+
+// Canal de WhatsApp al que se puede asignar un bot (resumen).
+export const botChannelRefSchema = z.object({
+  id: z.string(),
+  label: z.string().nullable(),
+  displayPhoneNumber: z.string().nullable(),
+});
+export type BotChannelRef = z.infer<typeof botChannelRefSchema>;
+
+// Bot completo que devuelve la API.
+export const botSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  model: z.string(),
+  effort: z.string(),
+  systemPrompt: z.string(),
+  enabledTools: z.array(z.string()),
+  maxIterations: z.number(),
+  escalationRules: escalationRulesSchema,
+  monthlyTokenBudget: z.number(),
+  isDefault: z.boolean(),
+  isActive: z.boolean(),
+  channelId: z.string().nullable(),
+  channel: botChannelRefSchema.nullable(),
+  // Automatización
+  autopilotByDefault: z.boolean(),
+  welcomeEnabled: z.boolean(),
+  welcomeMessage: z.string().nullable(),
+  businessHoursEnabled: z.boolean(),
+  businessHours: businessHoursSchema.nullable(),
+  keywordTriggers: z.array(keywordTriggerSchema),
+  createdAt: z.string(),
+});
+export type BotDto = z.infer<typeof botSchema>;
+
+// Respuesta de lista: bots + catálogo de tools + canales disponibles.
+export const botsResponseSchema = z.object({
+  bots: z.array(botSchema),
+  availableTools: z.array(agentToolInfoSchema),
+  channels: z.array(botChannelRefSchema),
+});
+export type BotsResponse = z.infer<typeof botsResponseSchema>;
+
+// Campos comunes editables de un bot.
+const botFields = {
+  name: z.string().min(1).max(120),
+  model: z.string().min(1),
+  effort: z.enum(effortValues),
+  systemPrompt: z.string().min(1).max(100_000),
+  enabledTools: z.array(z.string()),
+  maxIterations: z.number().int().min(1).max(20),
+  escalationRules: escalationRulesSchema,
+  monthlyTokenBudget: z.number().int().min(0),
+  isActive: z.boolean(),
+  channelId: z.string().nullable(),
+  autopilotByDefault: z.boolean(),
+  welcomeEnabled: z.boolean(),
+  welcomeMessage: z.string().max(2000).nullable(),
+  businessHoursEnabled: z.boolean(),
+  businessHours: businessHoursSchema.nullable(),
+  keywordTriggers: z.array(keywordTriggerSchema),
+};
+
+// Crear: todo con defaults sensatos para lo opcional.
+export const createBotSchema = z.object({
+  name: botFields.name,
+  model: botFields.model.default("claude-opus-4-8"),
+  effort: botFields.effort.default("medium"),
+  systemPrompt: botFields.systemPrompt,
+  enabledTools: botFields.enabledTools.default([]),
+  maxIterations: botFields.maxIterations.default(6),
+  escalationRules: botFields.escalationRules.default({}),
+  monthlyTokenBudget: botFields.monthlyTokenBudget.default(0),
+  isActive: botFields.isActive.default(true),
+  channelId: botFields.channelId.default(null),
+  autopilotByDefault: botFields.autopilotByDefault.default(false),
+  welcomeEnabled: botFields.welcomeEnabled.default(false),
+  welcomeMessage: botFields.welcomeMessage.default(null),
+  businessHoursEnabled: botFields.businessHoursEnabled.default(false),
+  businessHours: botFields.businessHours.default(null),
+  keywordTriggers: botFields.keywordTriggers.default([]),
+});
+export type CreateBotInput = z.infer<typeof createBotSchema>;
+
+// Actualizar: todo opcional.
+export const updateBotSchema = z.object({
+  name: botFields.name.optional(),
+  model: botFields.model.optional(),
+  effort: botFields.effort.optional(),
+  systemPrompt: botFields.systemPrompt.optional(),
+  enabledTools: botFields.enabledTools.optional(),
+  maxIterations: botFields.maxIterations.optional(),
+  escalationRules: botFields.escalationRules.optional(),
+  monthlyTokenBudget: botFields.monthlyTokenBudget.optional(),
+  isActive: botFields.isActive.optional(),
+  channelId: botFields.channelId.optional(),
+  autopilotByDefault: botFields.autopilotByDefault.optional(),
+  welcomeEnabled: botFields.welcomeEnabled.optional(),
+  welcomeMessage: botFields.welcomeMessage.optional(),
+  businessHoursEnabled: botFields.businessHoursEnabled.optional(),
+  businessHours: botFields.businessHours.optional(),
+  keywordTriggers: botFields.keywordTriggers.optional(),
+});
+export type UpdateBotInput = z.infer<typeof updateBotSchema>;

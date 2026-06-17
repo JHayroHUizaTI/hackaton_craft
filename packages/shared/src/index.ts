@@ -7,3 +7,5 @@ export * from "./schemas/ai.schema.js";
 export * from "./schemas/agent-config.schema.js";
 export * from "./schemas/knowledge.schema.js";
 export * from "./schemas/whatsapp.schema.js";
+export * from "./schemas/flow.schema.js";
+export * from "./schemas/campaign.schema.js";

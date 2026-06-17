@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { TopNav } from "@/components/TopNav";
+import { AppShell } from "@/components/AppShell";
 import { WhatsAppConnect } from "@/features/whatsapp/WhatsAppConnect";
 
 export default async function WhatsAppPage() {
@@ -9,9 +9,8 @@ export default async function WhatsAppPage() {
   const role = (session.user as { role?: string })?.role;
 
   return (
-    <>
-      <TopNav email={session.user?.email ?? ""} role={role} active="whatsapp" />
+    <AppShell email={session.user?.email ?? ""} role={role} active="whatsapp">
       <WhatsAppConnect />
-    </>
+    </AppShell>
   );
 }
