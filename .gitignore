@@ -18,6 +18,9 @@ out/
 .env.local
 .env.*.local
 
+.env.production
+.env.production.example
+
 # prisma
 apps/api/prisma/*.db
 

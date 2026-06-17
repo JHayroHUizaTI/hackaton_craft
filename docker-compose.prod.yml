@@ -24,7 +24,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    container_name: crm-api
     restart: unless-stopped
+    networks: [default, proxy]
     depends_on:
       db:
         condition: service_healthy
@@ -48,8 +50,9 @@ services:
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
       WHATSAPP_GRAPH_VERSION: ${WHATSAPP_GRAPH_VERSION:-v21.0}
-    ports:
-      - "3001:3001"
+    # Sin "ports": Nginx Proxy Manager lo alcanza por la red "proxy" como crm-api:3001.
+    expose:
+      - "3001"
 
   web:
     build:
@@ -61,7 +64,9 @@ services:
         NEXT_PUBLIC_WHATSAPP_CONFIG_ID: ${NEXT_PUBLIC_WHATSAPP_CONFIG_ID}
         NEXT_PUBLIC_COMPANY_NAME: ${NEXT_PUBLIC_COMPANY_NAME:-CRM Prime}
         NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL}
+    container_name: crm-web
     restart: unless-stopped
+    networks: [default, proxy]
     depends_on:
       - api
     environment:
@@ -70,8 +75,18 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_URL: ${AUTH_URL}
       HOSTNAME: "0.0.0.0"
-    ports:
-      - "3000:3000"
+    # Sin "ports": NPM lo alcanza por la red "proxy" como crm-web:3000.
+    expose:
+      - "3000"
+
+networks:
+  # Red interna del CRM (db, redis, api, web se ven entre sí).
+  default:
+  # Red compartida con Nginx Proxy Manager. Pon aquí el nombre EXACTO de la red
+  # de tu NPM (docker network ls). Por defecto suele ser "npm_default".
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-npm_default}
 
 volumes:
   crm-db-data:
