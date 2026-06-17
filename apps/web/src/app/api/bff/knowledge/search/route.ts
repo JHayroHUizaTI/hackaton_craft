@@ -1,0 +1,8 @@
+import { apiForward, relay } from "@/lib/api";
+
+export async function GET(req: Request) {
+  const q = new URL(req.url).searchParams.get("q") ?? "";
+  return relay(
+    await apiForward(`/knowledge/search?q=${encodeURIComponent(q)}`),
+  );
+}

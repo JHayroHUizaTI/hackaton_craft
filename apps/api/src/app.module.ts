@@ -1,0 +1,39 @@
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { EventEmitterModule } from "@nestjs/event-emitter";
+import { PrismaModule } from "./infra/prisma/prisma.module";
+import { QueueModule } from "./infra/queue/queue.module";
+import { AuthModule } from "./modules/auth/auth.module";
+import { MessagingModule } from "./modules/messaging/messaging.module";
+import { WhatsappModule } from "./modules/whatsapp/whatsapp.module";
+import { RealtimeModule } from "./modules/realtime/realtime.module";
+import { PipelineModule } from "./modules/pipeline/pipeline.module";
+import { ContactsModule } from "./modules/contacts/contacts.module";
+import { UsersModule } from "./modules/users/users.module";
+import { AiModule } from "./modules/ai/ai.module";
+import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
+import { HealthController } from "./health.controller";
+
+@Module({
+  imports: [
+    // Carga el .env de la raíz del monorepo.
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ["../../.env", ".env"],
+    }),
+    EventEmitterModule.forRoot(),
+    PrismaModule,
+    QueueModule,
+    AuthModule,
+    MessagingModule,
+    WhatsappModule,
+    RealtimeModule,
+    PipelineModule,
+    ContactsModule,
+    UsersModule,
+    KnowledgeModule,
+    AiModule,
+  ],
+  controllers: [HealthController],
+})
+export class AppModule {}

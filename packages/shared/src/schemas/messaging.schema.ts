@@ -1,0 +1,126 @@
+import { z } from "zod";
+import {
+  AiMode,
+  ConversationStatus,
+  MessageAuthor,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from "../enums.js";
+
+// ── Enviar mensaje saliente ─────────────────────────────────
+export const sendMessageSchema = z
+  .object({
+    conversationId: z.string(),
+    type: z
+      .enum([MessageType.TEXT, MessageType.IMAGE, MessageType.DOCUMENT])
+      .default(MessageType.TEXT),
+    text: z.string().max(4096).optional(),
+    mediaUrl: z.string().url().optional(),
+    caption: z.string().max(1024).optional(),
+  })
+  .refine(
+    (v) => (v.type === MessageType.TEXT ? !!v.text : !!v.mediaUrl),
+    "Texto requerido para TEXT; mediaUrl requerido para IMAGE/DOCUMENT",
+  );
+export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+
+// ── Simular un mensaje entrante (solo dev) ──────────────────
+export const simulateInboundSchema = z.object({
+  phone: z.string().min(6),
+  name: z.string().optional(),
+  text: z.string().min(1),
+});
+export type SimulateInboundInput = z.infer<typeof simulateInboundSchema>;
+
+// ── DTOs de salida ──────────────────────────────────────────
+export const messageDtoSchema = z.object({
+  id: z.string(),
+  direction: z.nativeEnum(MessageDirection),
+  type: z.nativeEnum(MessageType),
+  author: z.nativeEnum(MessageAuthor),
+  content: z.string().nullable(),
+  mediaUrl: z.string().nullable(),
+  status: z.nativeEnum(MessageStatus),
+  createdAt: z.string(),
+});
+export type MessageDto = z.infer<typeof messageDtoSchema>;
+
+export const assignedAgentSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+});
+
+export const conversationDtoSchema = z.object({
+  id: z.string(),
+  status: z.nativeEnum(ConversationStatus),
+  contact: z.object({
+    id: z.string(),
+    phone: z.string(),
+    name: z.string().nullable(),
+  }),
+  assignedAgent: assignedAgentSchema.nullable(),
+  // Número (canal) de WhatsApp por el que entró la conversación (multi-número).
+  channel: z
+    .object({
+      id: z.string(),
+      label: z.string().nullable(),
+      displayPhoneNumber: z.string().nullable(),
+    })
+    .nullable(),
+  aiMode: z.nativeEnum(AiMode),
+  aiPaused: z.boolean(),
+  windowExpiresAt: z.string().nullable(),
+  windowOpen: z.boolean(),
+  lastMessageAt: z.string().nullable(),
+  unread: z.number().optional(),
+});
+export type ConversationDto = z.infer<typeof conversationDtoSchema>;
+
+export const setAiModeSchema = z.object({
+  mode: z.nativeEnum(AiMode),
+});
+export type SetAiModeInput = z.infer<typeof setAiModeSchema>;
+
+// ── Filtros de la bandeja ───────────────────────────────────
+export const conversationFilter = ["all", "unassigned", "mine"] as const;
+export type ConversationFilter = (typeof conversationFilter)[number];
+
+export const conversationsQuerySchema = z.object({
+  filter: z.enum(conversationFilter).default("all"),
+  status: z.nativeEnum(ConversationStatus).optional(),
+});
+export type ConversationsQuery = z.infer<typeof conversationsQuerySchema>;
+
+// ── Acciones sobre la conversación ──────────────────────────
+export const assignConversationSchema = z.object({
+  agentId: z.string().nullable(), // null = liberar
+});
+export type AssignConversationInput = z.infer<typeof assignConversationSchema>;
+
+export const setStatusSchema = z.object({
+  status: z.nativeEnum(ConversationStatus),
+});
+export type SetStatusInput = z.infer<typeof setStatusSchema>;
+
+// ── Notas internas ──────────────────────────────────────────
+export const createNoteSchema = z.object({
+  body: z.string().min(1).max(2000),
+});
+export type CreateNoteInput = z.infer<typeof createNoteSchema>;
+
+export const noteDtoSchema = z.object({
+  id: z.string(),
+  body: z.string(),
+  author: z.object({ id: z.string(), name: z.string().nullable() }),
+  createdAt: z.string(),
+});
+export type NoteDto = z.infer<typeof noteDtoSchema>;
+
+// ── Agentes (para asignación) ───────────────────────────────
+export const agentDtoSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  email: z.string(),
+});
+export type AgentDto = z.infer<typeof agentDtoSchema>;

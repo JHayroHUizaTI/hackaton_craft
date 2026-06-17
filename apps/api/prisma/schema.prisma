@@ -1,0 +1,593 @@
+// CRM para WhatsApp con Agentes IA — esquema Prisma
+//
+// Notas:
+// - pgvector se habilita vía `extensions = [vector]` (preview de Prisma).
+// - El campo `embedding` usa `Unsupported("vector(1024)")`: Prisma no lo lee
+//   en el cliente ni expresa el índice vectorial. La búsqueda por similitud y
+//   el índice (HNSW/IVFFlat) se hacen con SQL crudo (`$queryRaw`) en una
+//   migración manual. 1024 dims = Voyage AI `voyage-3.5` (Anthropic no ofrece
+//   endpoint de embeddings; se usa un proveedor aparte para el RAG).
+// - Auth: NextAuth vive en apps/web con estrategia JWT + Credentials provider.
+//   NestJS sigue siendo dueño de `User` y autoridad del JWT. Por eso NO se
+//   incluyen las tablas del adapter (Account/Session/VerificationToken):
+//   solo harían falta si se agrega OAuth (Google, etc.).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  AGENT
+}
+
+enum Platform {
+  WEB
+  IOS
+  ANDROID
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+enum AiMode {
+  AUTOPILOT
+  COPILOT
+  OFF
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  STICKER
+  LOCATION
+  TEMPLATE
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// Quién originó el mensaje saliente (o el entrante).
+enum MessageAuthor {
+  CONTACT
+  HUMAN
+  AI
+}
+
+enum TemplateStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAUSED
+  DISABLED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+enum AiRunStatus {
+  RUNNING
+  COMPLETED
+  ESCALATED
+  REFUSED
+  ERROR
+}
+
+enum AiToolCallStatus {
+  PENDING_APPROVAL
+  EXECUTED
+  REJECTED
+  ERROR
+}
+
+enum AiMessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth / Usuarios
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         Role     @default(AGENT)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedConversations Conversation[] @relation("AssignedAgent")
+  approvedToolCalls     AiToolCall[]   @relation("ApprovedBy")
+  notes                 Note[]
+  sessions              Session[]
+  devices               Device[]
+  idempotencyKeys       IdempotencyKey[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Sesiones por dispositivo (auth multi-cliente: web + móvil)
+// ─────────────────────────────────────────────────────────────
+
+// Una Session = un login en un dispositivo = una "familia" de refresh tokens.
+// El usuario puede listar/revocar sus dispositivos conectados.
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  platform   Platform
+  deviceName String? // "iPhone de Ana", "Chrome en Windows"
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime? // revocación manual o por detección de reuso
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// Refresh tokens con rotación. En cada refresh se emite uno nuevo y el anterior
+// se marca rotado (replacedById). Si se presenta un token ya rotado/revocado
+// → reuso detectado → se revoca toda la Session (familia).
+model RefreshToken {
+  id           String    @id @default(cuid())
+  sessionId    String
+  tokenHash    String    @unique // se guarda el hash, nunca el token en crudo
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  rotatedAt    DateTime?
+  revokedAt    DateTime?
+  replacedById String?   @unique
+
+  session    Session       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("TokenRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces   RefreshToken? @relation("TokenRotation")
+
+  @@index([sessionId])
+  @@map("refresh_tokens")
+}
+
+// Dispositivos para notificaciones push (FCM/APNs). Independiente de Session:
+// un device puede tener token incluso sin sesión activa.
+model Device {
+  id            String    @id @default(cuid())
+  userId        String
+  platform      Platform
+  pushToken     String    @unique // token FCM/APNs
+  installationId String?  // id estable de instalación del cliente
+  isActive      Boolean   @default(true)
+  lastSeenAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
+}
+
+// Idempotencia de mutaciones: el cliente envía una clave única por operación
+// (header Idempotency-Key). Reintentos en redes malas (móvil) NO duplican
+// envíos de WhatsApp ni creaciones. Se purgan tras `expiresAt`.
+model IdempotencyKey {
+  id           String   @id @default(cuid())
+  key          String
+  userId       String
+  method       String
+  path         String
+  requestHash  String // hash del body para detectar misma-clave/distinto-body
+  responseCode Int?
+  responseBody Json?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Contactos / Etiquetas
+// ─────────────────────────────────────────────────────────────
+
+model Contact {
+  id            String   @id @default(cuid())
+  phone         String   @unique // E.164
+  name          String?
+  optIn         Boolean  @default(true)
+  lastMessageAt DateTime?
+  metadata      Json? // atributos libres (ciudad, idioma, etc.)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tags          ContactTag[]
+  conversations Conversation[]
+  deals         Deal[]
+
+  @@index([optIn])
+  @@index([lastMessageAt])
+  @@map("contacts")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+
+  contacts  ContactTag[]
+  campaigns CampaignTag[]
+
+  @@map("tags")
+}
+
+// Join explícito Contact <-> Tag (permite metadatos en la relación a futuro).
+model ContactTag {
+  contactId String
+  tagId     String
+  assignedAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@map("contact_tags")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Conversaciones / Mensajes
+// ─────────────────────────────────────────────────────────────
+
+model Conversation {
+  id              String             @id @default(cuid())
+  contactId       String
+  channelId       String? // por qué número de WhatsApp entró (multi-número)
+  assignedAgentId String?
+  status          ConversationStatus @default(OPEN)
+  windowExpiresAt DateTime? // ventana de 24h de WhatsApp
+  aiMode          AiMode             @default(COPILOT)
+  aiPausedUntil   DateTime? // si un humano interviene, la IA se pausa hasta esta hora
+  lastMessageAt   DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  contact       Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  channel       WhatsappConnection? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  assignedAgent User?               @relation("AssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  messages      Message[]
+  notes         Note[]
+  aiRuns        AiRun[]
+  aiMessages    AiMessage[]
+
+  @@index([status])
+  @@index([channelId])
+  @@index([assignedAgentId])
+  @@index([aiMode])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  waMessageId    String?          @unique // idempotencia: eventos duplicados se ignoran
+  direction      MessageDirection
+  type           MessageType
+  author         MessageAuthor
+  content        String? // texto o caption
+  mediaUrl       String?
+  templateId     String?
+  status         MessageStatus    @default(QUEUED)
+  // Trazabilidad: si lo generó la IA, enlaza al run que lo produjo.
+  aiRunId        String?
+  errorReason    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  template     Template?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  aiRun        AiRun?       @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([status])
+  @@map("messages")
+}
+
+// Notas internas (no se envían al contacto).
+model Note {
+  id             String   @id @default(cuid())
+  conversationId String
+  authorId       String
+  body           String
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("notes")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Plantillas / Campañas
+// ─────────────────────────────────────────────────────────────
+
+model Template {
+  id           String         @id @default(cuid())
+  waTemplateId String?        @unique
+  name         String
+  language     String         @default("es")
+  status       TemplateStatus @default(PENDING)
+  body         String
+  variables    Json? // definición de variables/posiciones
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  campaigns Campaign[]
+  messages  Message[]
+
+  @@map("templates")
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  templateId  String
+  status      CampaignStatus @default(DRAFT)
+  scheduledAt DateTime?
+  // Métricas agregadas (también derivables de Message, cacheadas aquí).
+  totalRecipients Int        @default(0)
+  sentCount       Int        @default(0)
+  deliveredCount  Int        @default(0)
+  readCount       Int        @default(0)
+  failedCount     Int        @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  template Template      @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  tags     CampaignTag[] // audiencia: contactos con estas etiquetas
+
+  @@index([status])
+  @@map("campaigns")
+}
+
+model CampaignTag {
+  campaignId String
+  tagId      String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, tagId])
+  @@map("campaign_tags")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Pipeline / Deals
+// ─────────────────────────────────────────────────────────────
+
+// Columnas del kanban (configurables, ordenadas).
+model PipelineStage {
+  id        String   @id @default(cuid())
+  name      String
+  order     Int
+  isWon     Boolean  @default(false)
+  isLost    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  deals Deal[]
+
+  @@unique([order])
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id        String   @id @default(cuid())
+  contactId String
+  stageId   String
+  title     String
+  value     Decimal? @db.Decimal(12, 2)
+  currency  String   @default("USD")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contact Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  stage   PipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+
+  @@index([contactId])
+  @@index([stageId])
+  @@map("deals")
+}
+
+// ─────────────────────────────────────────────────────────────
+// IA: configuración, runs, tool calls, memoria
+// ─────────────────────────────────────────────────────────────
+
+model AgentConfig {
+  id                 String   @id @default(cuid())
+  name               String
+  systemPrompt       String
+  model              String   @default("claude-opus-4-8")
+  effort             String   @default("medium") // low | medium | high | xhigh | max
+  enabledTools       String[] // nombres de tools habilitadas
+  maxIterations      Int      @default(6)
+  escalationRules    Json? // umbrales: confianza, sentimiento, palabras clave
+  monthlyTokenBudget Int      @default(0) // 0 = sin límite
+  isDefault          Boolean  @default(false)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  runs AiRun[]
+
+  @@map("agent_configs")
+}
+
+// Una "corrida" del agente: el procesamiento de un mensaje entrante.
+model AiRun {
+  id             String      @id @default(cuid())
+  conversationId String
+  agentConfigId  String?
+  status         AiRunStatus @default(RUNNING)
+  model          String
+  // Clasificación (output estructurado): intención, sentimiento, urgencia, etc.
+  classification Json?
+  confidence     Float?
+  escalationReason String?
+  inputTokens    Int         @default(0)
+  outputTokens   Int         @default(0)
+  costUsd        Decimal     @default(0) @db.Decimal(10, 6)
+  latencyMs      Int?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agentConfig  AgentConfig? @relation(fields: [agentConfigId], references: [id], onDelete: SetNull)
+  toolCalls    AiToolCall[]
+  messages     Message[] // mensajes que este run produjo
+
+  @@index([conversationId, createdAt])
+  @@index([status])
+  @@map("ai_runs")
+}
+
+// Cada invocación de herramienta dentro de un run (auditoría + aprobación).
+model AiToolCall {
+  id           String           @id @default(cuid())
+  aiRunId      String
+  toolName     String
+  input        Json
+  output       Json?
+  status       AiToolCallStatus @default(PENDING_APPROVAL)
+  approvedById String? // quién aprobó/rechazó en modo copilot
+  errorReason  String?
+  createdAt    DateTime         @default(now())
+  resolvedAt   DateTime?
+
+  aiRun      AiRun @relation(fields: [aiRunId], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("ApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([aiRunId])
+  @@index([status])
+  @@map("ai_tool_calls")
+}
+
+// Historial canónico que se replica al LLM (incluye bloques de thinking/tool).
+model AiMessage {
+  id             String        @id @default(cuid())
+  conversationId String
+  role           AiMessageRole
+  content        Json // bloques de contenido (text, tool_use, tool_result)
+  thinkingBlocks Json? // se devuelven sin modificar al continuar en el mismo modelo
+  createdAt      DateTime      @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+// ─────────────────────────────────────────────────────────────
+// RAG: base de conocimiento
+// ─────────────────────────────────────────────────────────────
+
+model KnowledgeDoc {
+  id        String   @id @default(cuid())
+  title     String
+  source    String? // url, nombre de archivo, etc.
+  content   String
+  metadata  Json?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks KnowledgeChunk[]
+
+  @@map("knowledge_docs")
+}
+
+model KnowledgeChunk {
+  id         String   @id @default(cuid())
+  docId      String
+  content    String
+  tokenCount Int      @default(0)
+  // Embedding (Voyage AI voyage-3.5 → 1024 dims). Prisma no lee este campo ni
+  // crea el índice: la búsqueda por similitud y el índice HNSW se hacen con SQL
+  // crudo en una migración manual:
+  //   CREATE INDEX ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);
+  embedding  Unsupported("vector(1024)")?
+  createdAt  DateTime @default(now())
+
+  doc KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@index([docId])
+  @@map("knowledge_chunks")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Conexión de WhatsApp (Cloud API / Coexistencia)
+// ─────────────────────────────────────────────────────────────
+
+// Credenciales de cada número de WhatsApp conectado (un canal por número),
+// obtenidas vía Embedded Signup. El adaptador de Meta las lee en tiempo de
+// ejecución (con fallback al .env). Pueden coexistir varias activas a la vez.
+model WhatsappConnection {
+  id                 String   @id @default(cuid())
+  wabaId             String? // WhatsApp Business Account ID
+  phoneNumberId      String   @unique // identifica el canal de forma única
+  displayPhoneNumber String? // el número en formato legible
+  label              String? // alias visible ("Ventas", "Soporte", etc.)
+  accessToken        String // token (largo) para enviar mensajes
+  mode               String   @default("coexistence") // coexistence | api
+  status             String   @default("connected") // connected | error
+  isActive           Boolean  @default(true)
+  connectedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@index([isActive])
+  @@map("whatsapp_connections")
+}
