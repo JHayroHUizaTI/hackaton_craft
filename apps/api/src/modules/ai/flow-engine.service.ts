@@ -1,4 +1,6 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
 import {
   AiMode,
   ConversationStatus,
@@ -9,6 +11,7 @@ import {
 } from "@crm/shared";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../infra/prisma/prisma.service";
+import { QUEUE_FLOW } from "../../infra/queue/queue.constants";
 import { MessagingService } from "../messaging/messaging.service";
 import { AutopilotService } from "./autopilot.service";
 
@@ -31,6 +34,7 @@ export class FlowEngineService {
     private readonly prisma: PrismaService,
     private readonly messaging: MessagingService,
     private readonly autopilot: AutopilotService,
+    @InjectQueue(QUEUE_FLOW) private readonly flowQueue: Queue,
   ) {}
 
   // ── Conversación nueva: ¿arranca un flujo "al iniciar"? ─────
@@ -60,6 +64,9 @@ export class FlowEngineService {
     const session = await this.prisma.flowSession.findUnique({
       where: { conversationId },
     });
+
+    // Flujo pausado en un "Esperar": ignorar el mensaje hasta que venza el timer.
+    if (session && session.status === "waiting_timer") return true;
 
     // Sesión esperando respuesta a una pregunta → reanudar.
     if (session && session.status === "running" && session.currentNodeId) {
@@ -175,11 +182,116 @@ export class FlowEngineService {
         continue;
       }
 
+      if (node.type === "delay") {
+        // Pausar: persistir el siguiente nodo y programar la reanudación.
+        const nextId = this.nextNodeId(flow.edges, node.id);
+        const ms = this.delayMs(node);
+        if (!nextId || ms <= 0) {
+          current = nextId;
+          continue;
+        }
+        await this.persist(conversationId, nextId, vars, "waiting_timer");
+        await this.flowQueue.add(
+          "resume",
+          { conversationId },
+          { delay: ms },
+        );
+        return;
+      }
+
+      if (node.type === "http") {
+        await this.execHttp(node, vars);
+        current = this.nextNodeId(flow.edges, node.id);
+        continue;
+      }
+
+      if (node.type === "assign") {
+        if (node.data.agentId) {
+          await this.messaging
+            .assignConversation(conversationId, node.data.agentId)
+            .catch(() => undefined);
+        }
+        current = this.nextNodeId(flow.edges, node.id);
+        continue;
+      }
+
+      if (node.type === "jumpToFlow") {
+        const target = node.data.flowId
+          ? await this.loadFlow(node.data.flowId)
+          : null;
+        if (!target) break;
+        await this.prisma.flowSession.update({
+          where: { conversationId },
+          data: { flowId: target.id },
+        });
+        const start = target.nodes.find((n) => n.type === "start");
+        const firstId = start
+          ? this.nextNodeId(target.edges, start.id)
+          : (target.nodes[0]?.id ?? null);
+        await this.walk(target, conversationId, firstId, lastText, vars);
+        return;
+      }
+
       break;
     }
 
     // Fin del flujo (sin más nodos): completado.
     await this.persist(conversationId, null, vars, "completed");
+  }
+
+  // Reanuda un flujo tras vencer un bloque "Esperar".
+  async resumeTimer(conversationId: string): Promise<void> {
+    const session = await this.prisma.flowSession.findUnique({
+      where: { conversationId },
+    });
+    if (!session || session.status !== "waiting_timer" || !session.currentNodeId) {
+      return;
+    }
+    const flow = await this.loadFlow(session.flowId);
+    if (!flow) return;
+    const text = await this.lastInboundText(conversationId);
+    await this.persist(
+      conversationId,
+      session.currentNodeId,
+      { ...((session.variables as Vars | null) ?? {}) },
+      "running",
+    );
+    await this.walk(
+      flow,
+      conversationId,
+      session.currentNodeId,
+      text,
+      { ...((session.variables as Vars | null) ?? {}) },
+    );
+  }
+
+  private delayMs(node: FlowNode): number {
+    const v = node.data.delayValue ?? 0;
+    const unit = node.data.delayUnit ?? "minutes";
+    return unit === "hours" ? v * 3600_000 : v * 60_000;
+  }
+
+  // Petición HTTP a una API/webhook externa (p. ej. n8n).
+  private async execHttp(node: FlowNode, vars: Vars): Promise<void> {
+    const url = this.interpolate(node.data.url, vars);
+    if (!url) return;
+    try {
+      let headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (node.data.headers?.trim()) {
+        headers = { ...headers, ...JSON.parse(node.data.headers) };
+      }
+      const method = node.data.method ?? "POST";
+      const body =
+        method === "GET" || method === "DELETE"
+          ? undefined
+          : this.interpolate(node.data.httpBody, vars) || JSON.stringify(vars);
+      const res = await fetch(url, { method, headers, body });
+      const responseText = (await res.text()).slice(0, 2000);
+      if (node.data.saveAs) vars[node.data.saveAs] = responseText;
+    } catch (e) {
+      this.logger.warn(`HTTP del flujo falló: ${(e as Error).message}`);
+      if (node.data.saveAs) vars[node.data.saveAs] = "";
+    }
   }
 
   // ── Acciones del nodo "action" ──────────────────────────────

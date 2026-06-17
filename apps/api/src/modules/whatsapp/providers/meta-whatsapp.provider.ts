@@ -86,6 +86,22 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     });
   }
 
+  async sendReaction(
+    to: string,
+    targetWaMessageId: string,
+    emoji: string,
+    fromPhoneNumberId?: string,
+  ): Promise<SendResult> {
+    const creds = await this.connection.resolveCreds(fromPhoneNumberId);
+    if (!creds) return this.simulate("reaction", to, emoji);
+    return this.post(creds, {
+      messaging_product: "whatsapp",
+      to,
+      type: "reaction",
+      reaction: { message_id: targetWaMessageId, emoji },
+    });
+  }
+
   async downloadMedia(
     mediaId: string,
     fromPhoneNumberId?: string,

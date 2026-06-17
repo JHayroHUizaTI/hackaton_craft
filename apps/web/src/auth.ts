@@ -14,6 +14,9 @@ const API_URL = process.env.API_URL ?? "http://localhost:3001";
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
+  // Necesario detrás de un proxy (Nginx Proxy Manager) en el VPS: sin esto
+  // NextAuth rechaza la petición con UntrustedHost. AUTH_URL define el origen.
+  trustHost: true,
   providers: [
     Credentials({
       credentials: {

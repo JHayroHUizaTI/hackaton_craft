@@ -139,6 +139,7 @@ model User {
   sessions              Session[]
   devices               Device[]
   idempotencyKeys       IdempotencyKey[]
+  sources               UserSource[] // fuentes que atiende este vendedor
 
   @@map("users")
 }
@@ -238,24 +239,79 @@ model Contact {
   phone         String   @unique // E.164
   name          String?
   optIn         Boolean  @default(true)
+  sourceId      String? // origen del lead (fuente)
   lastMessageAt DateTime?
   metadata      Json? // atributos libres (ciudad, idioma, etc.)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  source        Source?        @relation(fields: [sourceId], references: [id], onDelete: SetNull)
   tags          ContactTag[]
   conversations Conversation[]
   deals         Deal[]
 
   @@index([optIn])
   @@index([lastMessageAt])
+  @@index([sourceId])
   @@map("contacts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Catálogo de productos / servicios
+// ─────────────────────────────────────────────────────────────
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  sku         String?  @unique
+  description String?
+  price       Decimal  @default(0) @db.Decimal(12, 2)
+  currency    String   @default("USD")
+  imageUrl    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("products")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Fuentes (origen del lead) y asignación a vendedores
+// ─────────────────────────────────────────────────────────────
+
+// Origen de los contactos: Facebook Ads, Instagram, Web, Referido, etc.
+model Source {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+
+  contacts Contact[]
+  users    UserSource[] // vendedores que atienden esta fuente
+
+  @@map("sources")
+}
+
+// Qué fuentes atiende cada vendedor. El vendedor solo ve conversaciones de
+// los contactos cuya fuente esté en esta lista.
+model UserSource {
+  userId   String
+  sourceId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, sourceId])
+  @@index([sourceId])
+  @@map("user_sources")
 }
 
 model Tag {
   id        String   @id @default(cuid())
   name      String   @unique
   color     String?
+  waLabelId String?  @unique // id de la etiqueta en la app (coexistencia)
   createdAt DateTime @default(now())
 
   contacts  ContactTag[]
@@ -322,6 +378,7 @@ model Message {
   mediaUrl       String?
   templateId     String?
   campaignId     String? // si el mensaje salió de una campaña/broadcast
+  reaction       String? // emoji de reacción sobre este mensaje (o null si se quitó)
   status         MessageStatus    @default(QUEUED)
   // Trazabilidad: si lo generó la IA, enlaza al run que lo produjo.
   aiRunId        String?

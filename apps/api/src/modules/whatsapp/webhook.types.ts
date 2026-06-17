@@ -19,7 +19,58 @@ export interface InboundStatusJob {
   status: MessageStatus;
 }
 
-export type InboundJob = InboundMessageJob | InboundStatusJob;
+// Coexistencia: mensaje que el negocio envió DESDE la app de WhatsApp del
+// celular. Meta lo reporta como "echo" para que el CRM se mantenga en sync.
+export interface InboundEchoJob {
+  kind: "echo";
+  to: string; // teléfono del cliente (destinatario)
+  waMessageId: string;
+  type: MessageType;
+  text?: string;
+  channelPhoneNumberId?: string;
+}
+
+// Reacción (emoji) de un contacto sobre un mensaje. Emoji vacío = se quitó.
+export interface InboundReactionJob {
+  kind: "reaction";
+  targetWaMessageId: string;
+  emoji: string;
+}
+
+// Coexistencia: un mensaje del historial importado al conectar el número.
+export interface InboundHistoryJob {
+  kind: "history";
+  customerWaId: string; // hilo (teléfono del cliente)
+  fromCustomer: boolean; // true = entrante; false = saliente (desde la app)
+  waMessageId: string;
+  type: MessageType;
+  text?: string;
+  timestampMs: number;
+  channelPhoneNumberId?: string;
+}
+
+// Coexistencia: sincronización de contactos y etiquetas de la app.
+export interface StateSyncItem {
+  kind: "contact" | "label" | "association";
+  action: "add" | "remove";
+  phone?: string;
+  name?: string;
+  labelId?: string;
+  labelName?: string;
+  labelColor?: string;
+}
+export interface InboundStateSyncJob {
+  kind: "state_sync";
+  items: StateSyncItem[];
+}
+
+export type InboundJob =
+  | InboundMessageJob
+  | InboundStatusJob
+  | InboundEchoJob
+  | InboundReactionJob
+  | InboundHistoryJob
+  | InboundStateSyncJob;
 
 // ── Forma (parcial) del webhook de Meta ──────────────────────
 interface MetaContact {
@@ -33,16 +84,52 @@ interface MetaMessage {
   text?: { body: string };
   image?: { id: string; caption?: string };
   document?: { id: string; caption?: string };
+  reaction?: { message_id: string; emoji?: string };
 }
 interface MetaStatus {
   id: string;
   status: string;
+}
+// Echo de coexistencia: el negocio envió desde la app del celular.
+interface MetaMessageEcho {
+  to?: string;
+  from?: string;
+  id: string;
+  type: string;
+  text?: { body: string };
+  image?: { id: string; caption?: string };
+  document?: { id: string; caption?: string };
+}
+// Historial importado (coexistencia).
+interface MetaHistoryMessage {
+  id: string;
+  from: string;
+  to?: string;
+  type: string;
+  timestamp?: string;
+  text?: { body: string };
+  image?: { caption?: string };
+  document?: { caption?: string };
+}
+interface MetaHistory {
+  threads?: { id: string; messages?: MetaHistoryMessage[] }[];
+}
+// Sincronización de estado de la app (coexistencia).
+interface MetaStateSync {
+  type: string; // contact | label | contact_label_association
+  action?: string; // add | remove
+  contact?: { full_name?: string; phone_number?: string };
+  label?: { id?: string; name?: string; color?: string };
+  contact_label_association?: { phone_number?: string; label_id?: string };
 }
 interface MetaValue {
   metadata?: { display_phone_number?: string; phone_number_id?: string };
   contacts?: MetaContact[];
   messages?: MetaMessage[];
   statuses?: MetaStatus[];
+  message_echoes?: MetaMessageEcho[];
+  history?: MetaHistory[];
+  state_sync?: MetaStateSync[];
 }
 export interface MetaWebhookBody {
   entry?: { changes?: { value?: MetaValue }[] }[];
@@ -81,6 +168,15 @@ export function normalizeWebhook(body: MetaWebhookBody): InboundJob[] {
       }
 
       for (const m of value.messages ?? []) {
+        // Reacción: no es un mensaje nuevo, sino un emoji sobre otro mensaje.
+        if (m.type === "reaction" && m.reaction) {
+          jobs.push({
+            kind: "reaction",
+            targetWaMessageId: m.reaction.message_id,
+            emoji: m.reaction.emoji ?? "",
+          });
+          continue;
+        }
         const type = TYPE_MAP[m.type] ?? MessageType.TEXT;
         jobs.push({
           kind: "message",
@@ -98,6 +194,75 @@ export function normalizeWebhook(body: MetaWebhookBody): InboundJob[] {
         const status = STATUS_MAP[s.status];
         if (status) jobs.push({ kind: "status", waMessageId: s.id, status });
       }
+
+      // Coexistencia: mensajes enviados desde la app del celular.
+      for (const e of value.message_echoes ?? []) {
+        if (!e.to) continue;
+        jobs.push({
+          kind: "echo",
+          to: e.to,
+          waMessageId: e.id,
+          type: TYPE_MAP[e.type] ?? MessageType.TEXT,
+          text: e.text?.body ?? e.image?.caption ?? e.document?.caption,
+          channelPhoneNumberId,
+        });
+      }
+
+      // Coexistencia: historial de chats importado al conectar.
+      for (const h of value.history ?? []) {
+        for (const thread of h.threads ?? []) {
+          for (const m of thread.messages ?? []) {
+            jobs.push({
+              kind: "history",
+              customerWaId: thread.id,
+              fromCustomer: m.from === thread.id,
+              waMessageId: m.id,
+              type: TYPE_MAP[m.type] ?? MessageType.TEXT,
+              text: m.text?.body ?? m.image?.caption ?? m.document?.caption,
+              timestampMs: m.timestamp ? Number(m.timestamp) * 1000 : Date.now(),
+              channelPhoneNumberId,
+            });
+          }
+        }
+      }
+
+      // Coexistencia: sincronización de contactos y etiquetas.
+      const syncItems = (value.state_sync ?? [])
+        .map((s): StateSyncItem | null => {
+          const action = s.action === "remove" ? "remove" : "add";
+          if (s.type === "contact" && s.contact?.phone_number) {
+            return {
+              kind: "contact",
+              action,
+              phone: s.contact.phone_number,
+              name: s.contact.full_name,
+            };
+          }
+          if (s.type === "label" && s.label?.id) {
+            return {
+              kind: "label",
+              action,
+              labelId: s.label.id,
+              labelName: s.label.name,
+              labelColor: s.label.color,
+            };
+          }
+          if (
+            s.type === "contact_label_association" &&
+            s.contact_label_association?.phone_number &&
+            s.contact_label_association?.label_id
+          ) {
+            return {
+              kind: "association",
+              action,
+              phone: s.contact_label_association.phone_number,
+              labelId: s.contact_label_association.label_id,
+            };
+          }
+          return null;
+        })
+        .filter((x): x is StateSyncItem => x !== null);
+      if (syncItems.length) jobs.push({ kind: "state_sync", items: syncItems });
     }
   }
   return jobs;

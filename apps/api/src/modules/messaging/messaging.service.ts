@@ -156,6 +156,224 @@ export class MessagingService {
     this.events.emit("conversation.inbound", { conversationId: conversation.id });
   }
 
+  // ── Coexistencia: mensaje enviado desde la app del celular ─────
+  // Se registra como saliente (autor humano) y se pausa la IA, porque un
+  // humano está respondiendo desde el teléfono.
+  async handleEcho(echo: {
+    to: string;
+    waMessageId: string;
+    type: MessageType;
+    text?: string;
+    channelPhoneNumberId?: string;
+  }): Promise<void> {
+    const existing = await this.prisma.message.findUnique({
+      where: { waMessageId: echo.waMessageId },
+      select: { id: true },
+    });
+    if (existing) return; // idempotencia
+
+    const now = new Date();
+    const contact = await this.prisma.contact.upsert({
+      where: { phone: echo.to },
+      create: { phone: echo.to, lastMessageAt: now },
+      update: { lastMessageAt: now },
+    });
+
+    const channelId = echo.channelPhoneNumberId
+      ? await this.connection.resolveChannelId(echo.channelPhoneNumberId)
+      : null;
+
+    const open = await this.prisma.conversation.findFirst({
+      where: { contactId: contact.id, status: { not: "CLOSED" } },
+      orderBy: { createdAt: "desc" },
+    });
+    const conversation = open
+      ? await this.prisma.conversation.update({
+          where: { id: open.id },
+          data: {
+            lastMessageAt: now,
+            // Un humano contestó desde el celular → pausar la IA.
+            aiPausedUntil: new Date(now.getTime() + this.humanPauseMs),
+            ...(channelId && !open.channelId ? { channelId } : {}),
+          },
+        })
+      : await this.prisma.conversation.create({
+          data: {
+            contactId: contact.id,
+            channelId,
+            status: "OPEN",
+            lastMessageAt: now,
+            aiPausedUntil: new Date(now.getTime() + this.humanPauseMs),
+          },
+        });
+
+    await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        waMessageId: echo.waMessageId,
+        direction: MessageDirection.OUTBOUND,
+        type: echo.type,
+        author: MessageAuthor.HUMAN,
+        content: echo.text,
+        status: MessageStatus.SENT,
+      },
+    });
+
+    this.logger.log(`→ (desde celular) ${echo.to}: "${echo.text ?? echo.type}"`);
+    this.notify(conversation.id);
+  }
+
+  // ── Reacción entrante (emoji sobre un mensaje) ─────────────────
+  async handleReaction(targetWaMessageId: string, emoji: string): Promise<void> {
+    const msg = await this.prisma.message.findUnique({
+      where: { waMessageId: targetWaMessageId },
+      select: { id: true, conversationId: true },
+    });
+    if (!msg) return;
+    await this.prisma.message.update({
+      where: { id: msg.id },
+      data: { reaction: emoji || null },
+    });
+    this.notify(msg.conversationId);
+  }
+
+  // ── Reaccionar a un mensaje desde el CRM (enviar a WhatsApp) ───
+  async reactToMessage(messageId: string, emoji: string): Promise<MessageDto> {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: { conversation: { include: { contact: true, channel: true } } },
+    });
+    if (!message) throw new NotFoundException("Mensaje no encontrado");
+    if (message.waMessageId) {
+      await this.wa.sendReaction(
+        message.conversation.contact.phone,
+        message.waMessageId,
+        emoji,
+        message.conversation.channel?.phoneNumberId,
+      );
+    }
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { reaction: emoji || null },
+    });
+    this.notify(message.conversationId);
+    return this.toMessageDto(updated);
+  }
+
+  // ── Coexistencia: importar un mensaje del historial ────────────
+  async handleHistory(job: {
+    customerWaId: string;
+    fromCustomer: boolean;
+    waMessageId: string;
+    type: MessageType;
+    text?: string;
+    timestampMs: number;
+    channelPhoneNumberId?: string;
+  }): Promise<void> {
+    const existing = await this.prisma.message.findUnique({
+      where: { waMessageId: job.waMessageId },
+      select: { id: true },
+    });
+    if (existing) return; // idempotencia
+
+    const when = new Date(job.timestampMs);
+    const contact = await this.prisma.contact.upsert({
+      where: { phone: job.customerWaId },
+      create: { phone: job.customerWaId, lastMessageAt: when },
+      update: {},
+    });
+
+    const channelId = job.channelPhoneNumberId
+      ? await this.connection.resolveChannelId(job.channelPhoneNumberId)
+      : null;
+
+    let conversation = await this.prisma.conversation.findFirst({
+      where: { contactId: contact.id },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: {
+          contactId: contact.id,
+          channelId,
+          status: "CLOSED", // historial: no abre una conversación activa
+          lastMessageAt: when,
+        },
+      });
+    }
+
+    await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        waMessageId: job.waMessageId,
+        direction: job.fromCustomer
+          ? MessageDirection.INBOUND
+          : MessageDirection.OUTBOUND,
+        type: job.type,
+        author: job.fromCustomer ? MessageAuthor.CONTACT : MessageAuthor.HUMAN,
+        content: job.text,
+        status: MessageStatus.DELIVERED,
+        createdAt: when, // conserva el orden histórico
+      },
+    });
+    // Importación silenciosa: no dispara IA ni automatización.
+  }
+
+  // ── Coexistencia: sincronizar contactos y etiquetas ───────────
+  async handleStateSync(
+    items: {
+      kind: "contact" | "label" | "association";
+      action: "add" | "remove";
+      phone?: string;
+      name?: string;
+      labelId?: string;
+      labelName?: string;
+      labelColor?: string;
+    }[],
+  ): Promise<void> {
+    for (const it of items) {
+      try {
+        if (it.kind === "contact" && it.phone) {
+          await this.prisma.contact.upsert({
+            where: { phone: it.phone },
+            create: { phone: it.phone, name: it.name },
+            update: it.name ? { name: it.name } : {},
+          });
+        } else if (it.kind === "label" && it.labelId) {
+          await this.prisma.tag.upsert({
+            where: { waLabelId: it.labelId },
+            create: {
+              waLabelId: it.labelId,
+              name: it.labelName ?? it.labelId,
+              color: it.labelColor,
+            },
+            update: it.labelName ? { name: it.labelName } : {},
+          });
+        } else if (it.kind === "association" && it.phone && it.labelId) {
+          const [contact, tag] = await Promise.all([
+            this.prisma.contact.findUnique({ where: { phone: it.phone } }),
+            this.prisma.tag.findUnique({ where: { waLabelId: it.labelId } }),
+          ]);
+          if (contact && tag) {
+            if (it.action === "remove") {
+              await this.prisma.contactTag
+                .delete({
+                  where: { contactId_tagId: { contactId: contact.id, tagId: tag.id } },
+                })
+                .catch(() => undefined);
+            } else {
+              await this.prisma.contactTag
+                .create({ data: { contactId: contact.id, tagId: tag.id } })
+                .catch(() => undefined);
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.warn(`State sync item falló: ${(e as Error).message}`);
+      }
+    }
+  }
+
   // ── Actualización de estado (sent/delivered/read/failed) ───────
   async handleStatus(waMessageId: string, status: MessageStatus): Promise<void> {
     const msg = await this.prisma.message.findUnique({
@@ -239,7 +457,7 @@ export class MessagingService {
       .update({
         where: { id },
         data: { aiMode: mode },
-        include: { contact: true, assignedAgent: true, channel: true },
+        include: { contact: { include: { tags: { include: { tag: true } }, source: true } }, assignedAgent: true, channel: true },
       })
       .catch(() => {
         throw new NotFoundException("Conversación no encontrada");
@@ -291,6 +509,7 @@ export class MessagingService {
   async listConversations(
     userId: string,
     opts: { filter: ConversationFilter; status?: ConversationStatus },
+    role?: string,
   ): Promise<ConversationDto[]> {
     const where: Prisma.ConversationWhereInput = {};
 
@@ -302,10 +521,24 @@ export class MessagingService {
     if (opts.filter === "unassigned") where.assignedAgentId = null;
     else if (opts.filter === "mine") where.assignedAgentId = userId;
 
+    // Vendedor (no admin): solo conversaciones de sus fuentes asignadas.
+    if (role && role !== "ADMIN") {
+      const assigned = await this.prisma.userSource.findMany({
+        where: { userId },
+        select: { sourceId: true },
+      });
+      // `in: []` no coincide con nada → sin fuentes asignadas, ve cero.
+      where.contact = { sourceId: { in: assigned.map((a) => a.sourceId) } };
+    }
+
     const rows = await this.prisma.conversation.findMany({
       where,
       orderBy: { lastMessageAt: "desc" },
-      include: { contact: true, assignedAgent: true, channel: true },
+      include: {
+        contact: { include: { tags: { include: { tag: true } }, source: true } },
+        assignedAgent: true,
+        channel: true,
+      },
       take: 100,
     });
     return rows.map((c) => this.toConversationDto(c));
@@ -323,7 +556,7 @@ export class MessagingService {
       .update({
         where: { id },
         data: { assignedAgentId: agentId },
-        include: { contact: true, assignedAgent: true, channel: true },
+        include: { contact: { include: { tags: { include: { tag: true } }, source: true } }, assignedAgent: true, channel: true },
       })
       .catch(() => {
         throw new NotFoundException("Conversación no encontrada");
@@ -340,7 +573,7 @@ export class MessagingService {
       .update({
         where: { id },
         data: { status },
-        include: { contact: true, assignedAgent: true, channel: true },
+        include: { contact: { include: { tags: { include: { tag: true } }, source: true } }, assignedAgent: true, channel: true },
       })
       .catch(() => {
         throw new NotFoundException("Conversación no encontrada");
@@ -388,7 +621,13 @@ export class MessagingService {
     aiPausedUntil: Date | null;
     windowExpiresAt: Date | null;
     lastMessageAt: Date | null;
-    contact: { id: string; phone: string; name: string | null };
+    contact: {
+      id: string;
+      phone: string;
+      name: string | null;
+      tags?: { tag: { name: string; color: string | null } }[];
+      source?: { id: string; name: string; color: string | null } | null;
+    };
     assignedAgent: { id: string; name: string | null } | null;
     channel?: {
       id: string;
@@ -400,7 +639,22 @@ export class MessagingService {
     return {
       id: c.id,
       status: c.status as ConversationStatus,
-      contact: { id: c.contact.id, phone: c.contact.phone, name: c.contact.name },
+      contact: {
+        id: c.contact.id,
+        phone: c.contact.phone,
+        name: c.contact.name,
+        tags: (c.contact.tags ?? []).map((ct) => ({
+          name: ct.tag.name,
+          color: ct.tag.color,
+        })),
+        source: c.contact.source
+          ? {
+              id: c.contact.source.id,
+              name: c.contact.source.name,
+              color: c.contact.source.color,
+            }
+          : null,
+      },
       assignedAgent: c.assignedAgent
         ? { id: c.assignedAgent.id, name: c.assignedAgent.name }
         : null,
@@ -435,6 +689,7 @@ export class MessagingService {
     author: string;
     content: string | null;
     mediaUrl: string | null;
+    reaction?: string | null;
     status: string;
     createdAt: Date;
   }): MessageDto {
@@ -445,6 +700,7 @@ export class MessagingService {
       author: m.author as MessageAuthor,
       content: m.content,
       mediaUrl: m.mediaUrl,
+      reaction: m.reaction ?? null,
       status: m.status as MessageStatus,
       createdAt: m.createdAt.toISOString(),
     };

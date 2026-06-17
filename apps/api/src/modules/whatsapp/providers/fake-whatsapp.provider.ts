@@ -47,6 +47,18 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     return { waMessageId };
   }
 
+  async sendReaction(
+    to: string,
+    targetWaMessageId: string,
+    emoji: string,
+  ): Promise<SendResult> {
+    const waMessageId = `wamid.fake.${randomUUID()}`;
+    this.logger.log(
+      `→ [reaction:${emoji || "✕"}] a ${to} sobre ${targetWaMessageId}  (${waMessageId})`,
+    );
+    return { waMessageId };
+  }
+
   async downloadMedia(mediaId: string): Promise<DownloadedMedia> {
     this.logger.log(`↓ media simulada ${mediaId}`);
     return {

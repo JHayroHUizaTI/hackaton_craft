@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
@@ -12,6 +13,7 @@ import type {
   LoginInput,
   Platform,
   PublicUser,
+  RegisterInput,
   Role,
 } from "@crm/shared";
 import { PrismaService } from "../../infra/prisma/prisma.service";
@@ -33,10 +35,34 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
+  // ── Registro ───────────────────────────────────────────────
+  // El primer usuario del sistema es ADMIN (bootstrap); los siguientes son
+  // AGENT (vendedores). Un vendedor recién registrado no ve ninguna
+  // conversación hasta que un admin le asigne fuentes.
+  async register(input: RegisterInput): Promise<PublicUser> {
+    const email = input.email.toLowerCase().trim();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException("Ese correo ya está registrado");
+    }
+    const userCount = await this.prisma.user.count();
+    const role: Role = (userCount === 0 ? "ADMIN" : "AGENT") as Role;
+    const passwordHash = await bcrypt.hash(input.password, 10);
+    const user = await this.prisma.user.create({
+      data: { name: input.name.trim(), email, passwordHash, role },
+    });
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as Role,
+    };
+  }
+
   // ── Login ──────────────────────────────────────────────────
   async login(input: LoginInput, meta: DeviceMeta): Promise<AuthTokens> {
     const user = await this.prisma.user.findUnique({
-      where: { email: input.email },
+      where: { email: input.email.toLowerCase().trim() },
     });
     if (!user || !user.isActive) {
       throw new UnauthorizedException("Credenciales inválidas");
@@ -133,6 +159,15 @@ export class AuthService {
       { sub: claims.sub, sid: claims.sid, role: claims.role },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: "2m" },
     );
+  }
+
+  // Revoca una sesión concreta del usuario (cerrar un dispositivo remoto).
+  async revokeUserSession(userId: string, sessionId: string): Promise<void> {
+    const session = await this.prisma.session.findFirst({
+      where: { id: sessionId, userId },
+    });
+    if (!session) throw new UnauthorizedException("Sesión no encontrada");
+    await this.revokeSession(sessionId);
   }
 
   async revokeSession(sessionId: string): Promise<void> {

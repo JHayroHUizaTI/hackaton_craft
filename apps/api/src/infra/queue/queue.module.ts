@@ -2,6 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import {
   QUEUE_CAMPAIGN,
+  QUEUE_FLOW,
   QUEUE_INBOUND,
   QUEUE_OUTBOUND,
 } from "./queue.constants";
@@ -47,6 +48,16 @@ import {
           backoff: { type: "exponential", delay: 5000 },
           removeOnComplete: 5000,
           removeOnFail: 10000,
+        },
+      },
+      {
+        // Reanudación de flujos tras un bloque "Esperar" (jobs retrasados).
+        name: QUEUE_FLOW,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 5000 },
+          removeOnComplete: 1000,
+          removeOnFail: 5000,
         },
       },
     ),

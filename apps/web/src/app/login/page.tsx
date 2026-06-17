@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AuthError } from "next-auth";
 import { auth, signIn } from "@/auth";
 
 export default async function LoginPage({
@@ -12,11 +14,20 @@ export default async function LoginPage({
 
   async function login(formData: FormData) {
     "use server";
-    await signIn("credentials", {
-      email: formData.get("email"),
-      password: formData.get("password"),
-      redirectTo: "/",
-    });
+    try {
+      await signIn("credentials", {
+        email: formData.get("email"),
+        password: formData.get("password"),
+        redirectTo: "/",
+      });
+    } catch (e) {
+      // signIn lanza NEXT_REDIRECT al tener éxito (hay que re-lanzarlo).
+      // Si las credenciales fallan, lanza AuthError → volvemos con error.
+      if (e instanceof AuthError) {
+        redirect("/login?error=credentials");
+      }
+      throw e;
+    }
   }
 
   return (
@@ -41,7 +52,7 @@ export default async function LoginPage({
           name="email"
           type="email"
           required
-          defaultValue="admin@crm.local"
+          placeholder="tucorreo@empresa.com"
           style={input}
         />
 
@@ -51,6 +62,13 @@ export default async function LoginPage({
         <button type="submit" style={btn}>
           Entrar
         </button>
+
+        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 18, textAlign: "center" }}>
+          ¿No tienes cuenta?{" "}
+          <Link href="/register" style={{ color: "var(--accent)" }}>
+            Regístrate
+          </Link>
+        </p>
       </form>
     </main>
   );

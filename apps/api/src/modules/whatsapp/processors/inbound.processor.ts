@@ -28,6 +28,41 @@ export class InboundProcessor extends WorkerHost {
       return;
     }
 
+    // Coexistencia: mensaje enviado desde la app del celular.
+    if (data.kind === "echo") {
+      await this.messaging.handleEcho({
+        to: data.to,
+        waMessageId: data.waMessageId,
+        type: data.type,
+        text: data.text,
+        channelPhoneNumberId: data.channelPhoneNumberId,
+      });
+      return;
+    }
+
+    if (data.kind === "reaction") {
+      await this.messaging.handleReaction(data.targetWaMessageId, data.emoji);
+      return;
+    }
+
+    if (data.kind === "history") {
+      await this.messaging.handleHistory({
+        customerWaId: data.customerWaId,
+        fromCustomer: data.fromCustomer,
+        waMessageId: data.waMessageId,
+        type: data.type,
+        text: data.text,
+        timestampMs: data.timestampMs,
+        channelPhoneNumberId: data.channelPhoneNumberId,
+      });
+      return;
+    }
+
+    if (data.kind === "state_sync") {
+      await this.messaging.handleStateSync(data.items);
+      return;
+    }
+
     // Mensaje entrante: si trae medio, descargarlo antes de persistir.
     let mediaUrl: string | undefined;
     if (data.mediaId) {

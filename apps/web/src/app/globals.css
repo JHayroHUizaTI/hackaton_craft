@@ -105,6 +105,15 @@ a {
   color: var(--text);
 }
 
+/* Reacciones en mensajes (aparece al pasar el cursor sobre la burbuja) */
+.msg-row .react-trigger {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg-row:hover .react-trigger {
+  opacity: 1;
+}
+
 /* Animaciones de carga */
 @keyframes pulse {
   0%,

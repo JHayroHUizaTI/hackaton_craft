@@ -41,10 +41,18 @@ export const messageDtoSchema = z.object({
   author: z.nativeEnum(MessageAuthor),
   content: z.string().nullable(),
   mediaUrl: z.string().nullable(),
+  reaction: z.string().nullable(),
   status: z.nativeEnum(MessageStatus),
   createdAt: z.string(),
 });
 export type MessageDto = z.infer<typeof messageDtoSchema>;
+
+// Reaccionar a un mensaje (emoji vacío = quitar la reacción).
+export const reactMessageSchema = z.object({
+  messageId: z.string(),
+  emoji: z.string().max(8),
+});
+export type ReactMessageInput = z.infer<typeof reactMessageSchema>;
 
 export const assignedAgentSchema = z.object({
   id: z.string(),
@@ -58,6 +66,13 @@ export const conversationDtoSchema = z.object({
     id: z.string(),
     phone: z.string(),
     name: z.string().nullable(),
+    tags: z
+      .array(z.object({ name: z.string(), color: z.string().nullable() }))
+      .default([]),
+    source: z
+      .object({ id: z.string(), name: z.string(), color: z.string().nullable() })
+      .nullable()
+      .default(null),
   }),
   assignedAgent: assignedAgentSchema.nullable(),
   // Número (canal) de WhatsApp por el que entró la conversación (multi-número).

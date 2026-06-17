@@ -33,6 +33,8 @@ export function FlowsManager() {
         channels={data?.channels ?? []}
         bots={data?.bots ?? []}
         stages={(pipeline?.stages ?? []).map((s) => ({ id: s.id, name: s.name }))}
+        agents={data?.agents ?? []}
+        flows={data?.flows ?? []}
         onBack={() => setView({ kind: "list" })}
       />
     );

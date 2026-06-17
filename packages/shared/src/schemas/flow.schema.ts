@@ -7,8 +7,18 @@ export const flowNodeTypes = [
   "askQuestion",
   "condition",
   "action",
+  "delay",
+  "http",
+  "assign",
+  "jumpToFlow",
 ] as const;
 export type FlowNodeType = (typeof flowNodeTypes)[number];
+
+export const httpMethods = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+export type HttpMethod = (typeof httpMethods)[number];
+
+export const delayUnits = ["minutes", "hours"] as const;
+export type DelayUnit = (typeof delayUnits)[number];
 
 // Acciones del nodo "action".
 export const flowActionTypes = ["ai", "handoff", "tag", "move_deal"] as const;
@@ -35,6 +45,21 @@ export const flowNodeDataSchema = z.object({
   botId: z.string().nullable().optional(),
   tag: z.string().optional(),
   stageId: z.string().optional(),
+  // delay: esperar antes de continuar
+  delayValue: z.number().optional(),
+  delayUnit: z.enum(delayUnits).optional(),
+  // http: petición a una API/webhook externa
+  method: z.enum(httpMethods).optional(),
+  url: z.string().optional(),
+  headers: z.string().optional(), // JSON crudo: { "Authorization": "..." }
+  httpBody: z.string().optional(), // cuerpo (admite {{variables}})
+  saveAs: z.string().optional(), // variable donde guardar la respuesta
+  // assign: asignar a un agente
+  agentId: z.string().nullable().optional(),
+  agentName: z.string().optional(), // solo para mostrar en el lienzo
+  // jumpToFlow: continuar en otro flujo
+  flowId: z.string().optional(),
+  flowName: z.string().optional(), // solo para mostrar en el lienzo
 });
 export type FlowNodeData = z.infer<typeof flowNodeDataSchema>;
 
@@ -73,6 +98,14 @@ export const flowBotRefSchema = z.object({
 });
 export type FlowBotRef = z.infer<typeof flowBotRefSchema>;
 
+// Referencia ligera a un agente (usuario) para el nodo "assign".
+export const flowAgentRefSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  email: z.string(),
+});
+export type FlowAgentRef = z.infer<typeof flowAgentRefSchema>;
+
 // Flujo completo que devuelve la API.
 export const flowSchema = z.object({
   id: z.string(),
@@ -89,7 +122,7 @@ export const flowSchema = z.object({
 });
 export type FlowDto = z.infer<typeof flowSchema>;
 
-// Resumen para la lista.
+// Resumen para la lista (también sirve de selector en "saltar a flujo").
 export const flowSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -101,11 +134,12 @@ export const flowSummarySchema = z.object({
 });
 export type FlowSummary = z.infer<typeof flowSummarySchema>;
 
-// Respuesta de lista: flujos + canales + bots disponibles.
+// Respuesta de lista: flujos + canales + bots + agentes.
 export const flowsResponseSchema = z.object({
   flows: z.array(flowSummarySchema),
   channels: z.array(flowChannelRefSchema),
   bots: z.array(flowBotRefSchema),
+  agents: z.array(flowAgentRefSchema),
 });
 export type FlowsResponse = z.infer<typeof flowsResponseSchema>;
 

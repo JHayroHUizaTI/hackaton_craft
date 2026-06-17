@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -10,9 +12,11 @@ import {
 import type { Request } from "express";
 import {
   loginSchema,
+  registerSchema,
   refreshSchema,
   logoutSchema,
   type LoginInput,
+  type RegisterInput,
   type RefreshInput,
   type LogoutInput,
   type AccessTokenClaims,
@@ -25,6 +29,14 @@ import { AuthService } from "./auth.service";
 @Controller("auth")
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+
+  @Post("register")
+  @HttpCode(201)
+  register(
+    @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
+  ) {
+    return this.auth.register(body);
+  }
 
   @Post("login")
   @HttpCode(200)
@@ -58,6 +70,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   sessions(@CurrentUser() user: AccessTokenClaims) {
     return this.auth.listSessions(user.sub, user.sid);
+  }
+
+  @Delete("sessions/:id")
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  async revokeSession(
+    @CurrentUser() user: AccessTokenClaims,
+    @Param("id") id: string,
+  ): Promise<void> {
+    await this.auth.revokeUserSession(user.sub, id);
   }
 
   @Get("realtime-token")

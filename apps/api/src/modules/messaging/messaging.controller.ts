@@ -12,6 +12,7 @@ import {
   assignConversationSchema,
   conversationsQuerySchema,
   createNoteSchema,
+  reactMessageSchema,
   sendMessageSchema,
   setAiModeSchema,
   setStatusSchema,
@@ -19,6 +20,7 @@ import {
   type AssignConversationInput,
   type AccessTokenClaims,
   type CreateNoteInput,
+  type ReactMessageInput,
   type SendMessageInput,
   type SetAiModeInput,
   type SetStatusInput,
@@ -40,7 +42,7 @@ export class MessagingController {
     @Query("status") status?: string,
   ) {
     const q = conversationsQuerySchema.parse({ filter, status });
-    return this.messaging.listConversations(user.sub, q);
+    return this.messaging.listConversations(user.sub, q, user.role);
   }
 
   @Get("conversations/:id/messages")
@@ -51,6 +53,13 @@ export class MessagingController {
   @Post("messages")
   send(@Body(new ZodValidationPipe(sendMessageSchema)) body: SendMessageInput) {
     return this.messaging.queueOutbound(body, MessageAuthor.HUMAN);
+  }
+
+  @Post("messages/react")
+  react(
+    @Body(new ZodValidationPipe(reactMessageSchema)) body: ReactMessageInput,
+  ) {
+    return this.messaging.reactToMessage(body.messageId, body.emoji);
   }
 
   @Patch("conversations/:id/assign")

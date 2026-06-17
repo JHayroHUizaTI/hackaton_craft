@@ -5,22 +5,34 @@ import { NavIcon, type IconName } from "./NavIcons";
 
 export type NavKey =
   | "inbox"
+  | "contacts"
   | "pipeline"
+  | "products"
   | "bots"
   | "flows"
   | "campaigns"
+  | "sellers"
   | "knowledge"
-  | "whatsapp";
+  | "whatsapp"
+  | "sessions";
 
-type Item = { key: NavKey; href: string; label: string; icon: IconName };
+type Item = {
+  key: NavKey;
+  href: string;
+  label: string;
+  icon: IconName;
+  adminOnly?: boolean;
+};
 type Group = { label: string; items: Item[] };
 
 const NAV: Group[] = [
   {
-    label: "Conversaciones",
+    label: "Ventas",
     items: [
       { key: "inbox", href: "/", label: "Bandeja", icon: "inbox" },
+      { key: "contacts", href: "/contacts", label: "Contactos", icon: "user" },
       { key: "pipeline", href: "/pipeline", label: "Pipeline", icon: "pipeline" },
+      { key: "products", href: "/products", label: "Productos", icon: "tag" },
     ],
   },
   {
@@ -29,6 +41,18 @@ const NAV: Group[] = [
       { key: "bots", href: "/bots", label: "Bots IA", icon: "bot" },
       { key: "flows", href: "/flows", label: "Flujos", icon: "flow" },
       { key: "campaigns", href: "/campaigns", label: "Campañas", icon: "megaphone" },
+    ],
+  },
+  {
+    label: "Equipo",
+    items: [
+      {
+        key: "sellers",
+        href: "/sellers",
+        label: "Vendedores",
+        icon: "user",
+        adminOnly: true,
+      },
     ],
   },
   {
@@ -42,12 +66,16 @@ const NAV: Group[] = [
 
 const TITLES: Record<NavKey, { title: string; subtitle: string }> = {
   inbox: { title: "Bandeja", subtitle: "Conversaciones en tiempo real" },
+  contacts: { title: "Contactos", subtitle: "Directorio de clientes y leads" },
   pipeline: { title: "Pipeline", subtitle: "Embudo de ventas y deals" },
+  products: { title: "Productos", subtitle: "Catálogo de productos y servicios" },
   bots: { title: "Bots IA", subtitle: "Agentes que responden por ti" },
   flows: { title: "Flujos", subtitle: "Automatiza conversaciones paso a paso" },
   campaigns: { title: "Campañas", subtitle: "Envíos masivos y broadcasts" },
+  sellers: { title: "Vendedores", subtitle: "Fuentes y asignación de leads" },
   knowledge: { title: "Conocimiento", subtitle: "Base de conocimiento para la IA" },
   whatsapp: { title: "WhatsApp", subtitle: "Conecta y gestiona tus números" },
+  sessions: { title: "Sesiones", subtitle: "Dispositivos con tu cuenta abierta" },
 };
 
 export function AppShell({
@@ -72,21 +100,27 @@ export function AppShell({
         </div>
 
         <nav style={{ padding: "4px 10px", overflowY: "auto", flex: 1 }}>
-          {NAV.map((group) => (
-            <div key={group.label}>
-              <div className="nav-group">{group.label}</div>
-              {group.items.map((it) => (
-                <Link
-                  key={it.key}
-                  href={it.href}
-                  className={`nav-item${active === it.key ? " active" : ""}`}
-                >
-                  <NavIcon name={it.icon} />
-                  {it.label}
-                </Link>
-              ))}
-            </div>
-          ))}
+          {NAV.map((group) => {
+            const items = group.items.filter(
+              (it) => !it.adminOnly || role === "ADMIN",
+            );
+            if (items.length === 0) return null;
+            return (
+              <div key={group.label}>
+                <div className="nav-group">{group.label}</div>
+                {items.map((it) => (
+                  <Link
+                    key={it.key}
+                    href={it.href}
+                    className={`nav-item${active === it.key ? " active" : ""}`}
+                  >
+                    <NavIcon name={it.icon} />
+                    {it.label}
+                  </Link>
+                ))}
+              </div>
+            );
+          })}
         </nav>
       </aside>
 
@@ -100,13 +134,17 @@ export function AppShell({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <AgentConfigDrawer />
-            <div style={userChip}>
+            <Link
+              href="/sessions"
+              style={{ ...userChip, textDecoration: "none", color: "var(--text)" }}
+              title="Sesiones y dispositivos"
+            >
               <span style={avatar}>{(email[0] ?? "?").toUpperCase()}</span>
               <div style={{ lineHeight: 1.2 }}>
                 <div style={{ fontSize: 13 }}>{email}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>{role}</div>
               </div>
-            </div>
+            </Link>
             <form
               action={async () => {
                 "use server";

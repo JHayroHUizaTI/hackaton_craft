@@ -5,6 +5,7 @@ import type {
   AgentDto,
   AiMode,
   AiSuggestion,
+  SessionDto,
   IngestKnowledgeInput,
   KnowledgeDocDto,
   KnowledgeHit,
@@ -37,6 +38,15 @@ import type {
   CreateCampaignInput,
   UpdateCampaignInput,
   AudiencePreview,
+  SourceDto,
+  CreateSourceInput,
+  UpdateSourceInput,
+  SellersResponse,
+  ProductDto,
+  CreateProductInput,
+  UpdateProductInput,
+  ContactListItem,
+  UpdateContactInput,
 } from "@crm/shared";
 
 // Fetchers del lado del cliente: llaman al BFF (mismo origen, cookie httpOnly).
@@ -114,6 +124,18 @@ export async function fetchAgents(): Promise<AgentDto[]> {
   const res = await fetch("/api/bff/agents");
   if (!res.ok) throw new Error("No se pudieron cargar los agentes");
   return res.json();
+}
+
+// ── Sesiones / dispositivos ──────────────────────────────────
+export async function fetchSessions(): Promise<SessionDto[]> {
+  const res = await fetch("/api/bff/auth/sessions");
+  if (!res.ok) throw new Error("No se pudieron cargar las sesiones");
+  return res.json();
+}
+
+export async function revokeSession(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/auth/sessions/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo cerrar la sesión");
 }
 
 // ── Configuración del agente IA ──────────────────────────────
@@ -452,6 +474,150 @@ export async function sendMessage(input: SendMessageInput): Promise<MessageDto> 
     throw new Error(msg ?? "No se pudo enviar el mensaje");
   }
   return res.json();
+}
+
+export async function reactToMessage(
+  messageId: string,
+  emoji: string,
+): Promise<MessageDto> {
+  const res = await fetch("/api/bff/messages/react", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId, emoji }),
+  });
+  if (!res.ok) throw new Error("No se pudo reaccionar");
+  return res.json();
+}
+
+// ── Fuentes y vendedores ─────────────────────────────────────
+export async function fetchSources(): Promise<SourceDto[]> {
+  const res = await fetch("/api/bff/sources");
+  if (!res.ok) throw new Error("No se pudieron cargar las fuentes");
+  return res.json();
+}
+
+export async function createSource(input: CreateSourceInput): Promise<SourceDto> {
+  const res = await fetch("/api/bff/sources", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear la fuente");
+  }
+  return res.json();
+}
+
+export async function updateSource(
+  id: string,
+  input: UpdateSourceInput,
+): Promise<SourceDto> {
+  const res = await fetch(`/api/bff/sources/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar la fuente");
+  return res.json();
+}
+
+export async function deleteSource(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/sources/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo eliminar la fuente");
+}
+
+export async function fetchSellers(): Promise<SellersResponse> {
+  const res = await fetch("/api/bff/sellers");
+  if (!res.ok) throw new Error("No se pudieron cargar los vendedores");
+  return res.json();
+}
+
+export async function assignSellerSources(
+  sellerId: string,
+  sourceIds: string[],
+): Promise<void> {
+  const res = await fetch(`/api/bff/sellers/${sellerId}/sources`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceIds }),
+  });
+  if (!res.ok) throw new Error("No se pudo asignar");
+}
+
+export async function setContactSource(
+  contactId: string,
+  sourceId: string | null,
+): Promise<void> {
+  const res = await fetch("/api/bff/contacts/source", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contactId, sourceId }),
+  });
+  if (!res.ok) throw new Error("No se pudo cambiar la fuente");
+}
+
+// ── Contactos (directorio) ───────────────────────────────────
+export async function fetchContactDirectory(
+  search = "",
+): Promise<ContactListItem[]> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  const res = await fetch(`/api/bff/contacts/directory${qs}`);
+  if (!res.ok) throw new Error("No se pudieron cargar los contactos");
+  return res.json();
+}
+
+export async function updateContact(
+  id: string,
+  input: UpdateContactInput,
+): Promise<void> {
+  const res = await fetch(`/api/bff/contacts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar el contacto");
+}
+
+// ── Productos ────────────────────────────────────────────────
+export async function fetchProducts(search = ""): Promise<ProductDto[]> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  const res = await fetch(`/api/bff/products${qs}`);
+  if (!res.ok) throw new Error("No se pudieron cargar los productos");
+  return res.json();
+}
+
+export async function createProduct(
+  input: CreateProductInput,
+): Promise<ProductDto> {
+  const res = await fetch("/api/bff/products", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear el producto");
+  }
+  return res.json();
+}
+
+export async function updateProduct(
+  id: string,
+  input: UpdateProductInput,
+): Promise<ProductDto> {
+  const res = await fetch(`/api/bff/products/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar el producto");
+  return res.json();
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/products/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo eliminar el producto");
 }
 
 // ── Pipeline ─────────────────────────────────────────────────

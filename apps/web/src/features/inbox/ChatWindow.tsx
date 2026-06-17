@@ -15,11 +15,15 @@ import {
   fetchAgents,
   fetchMessages,
   fetchNotes,
+  fetchSources,
+  reactToMessage,
   sendMessage,
   setAiMode,
   setConversationStatus,
+  setContactSource,
   suggestReply,
 } from "@/lib/bff";
+import type { MessageDto } from "@crm/shared";
 
 export function ChatWindow({ conversation }: { conversation: ConversationDto }) {
   const queryClient = useQueryClient();
@@ -63,6 +67,24 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
     },
   });
 
+  const reactMut = useMutation({
+    mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string }) =>
+      reactToMessage(messageId, emoji),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["messages", conversation.id] }),
+  });
+
+  const { data: sources = [] } = useQuery({
+    queryKey: ["sources"],
+    queryFn: fetchSources,
+  });
+
+  const sourceMut = useMutation({
+    mutationFn: (sourceId: string | null) =>
+      setContactSource(conversation.contact.id, sourceId),
+    onSuccess: invalidateConvs,
+  });
+
   const assignMut = useMutation({
     mutationFn: (agentId: string | null) =>
       assignConversation(conversation.id, agentId),
@@ -94,6 +116,31 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
           <span style={{ color: "var(--muted)", fontSize: 13 }}>
             {conversation.contact.phone}
           </span>
+          {conversation.contact.tags.length > 0 && (
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
+              {conversation.contact.tags.map((t) => (
+                <span key={t.name} style={tagChip(t.color)}>
+                  {t.name}
+                </span>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>Fuente:</span>
+            <select
+              value={conversation.contact.source?.id ?? ""}
+              onChange={(e) => sourceMut.mutate(e.target.value || null)}
+              disabled={sourceMut.isPending}
+              style={sourceSelect}
+            >
+              <option value="">— Sin fuente —</option>
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <select
@@ -164,37 +211,13 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
 
       <div style={messagesArea}>
         {isLoading && <ChatSkeleton />}
-        {messages.map((m) => {
-          const out = m.direction === "OUTBOUND";
-          return (
-            <div
-              key={m.id}
-              style={{
-                alignSelf: out ? "flex-end" : "flex-start",
-                background: out ? "#155e3b" : "#1c2738",
-                color: "var(--text)",
-                padding: "8px 12px",
-                borderRadius: 10,
-                maxWidth: "70%",
-              }}
-            >
-              <div>{m.content ?? `[${m.type}]`}</div>
-              {out && (
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#9fd9b6",
-                    textAlign: "right",
-                    marginTop: 2,
-                  }}
-                >
-                  {m.author === "AI" ? "IA · " : ""}
-                  {m.status.toLowerCase()}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {messages.map((m) => (
+          <MessageBubble
+            key={m.id}
+            message={m}
+            onReact={(emoji) => reactMut.mutate({ messageId: m.id, emoji })}
+          />
+        ))}
         <div ref={bottomRef} />
       </div>
 
@@ -322,6 +345,149 @@ function NotesPanel({ conversationId }: { conversationId: string }) {
       </form>
     </div>
   );
+}
+
+const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+function MessageBubble({
+  message: m,
+  onReact,
+}: {
+  message: MessageDto;
+  onReact: (emoji: string) => void;
+}) {
+  const out = m.direction === "OUTBOUND";
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  return (
+    <div
+      className="msg-row"
+      style={{
+        alignSelf: out ? "flex-end" : "flex-start",
+        maxWidth: "70%",
+        display: "flex",
+        flexDirection: out ? "row-reverse" : "row",
+        alignItems: "center",
+        gap: 6,
+        position: "relative",
+      }}
+    >
+      <div
+        style={{
+          background: out ? "#155e3b" : "#1c2738",
+          color: "var(--text)",
+          padding: "8px 12px",
+          borderRadius: 10,
+          position: "relative",
+        }}
+      >
+        <div>{m.content ?? `[${m.type}]`}</div>
+        {out && (
+          <div style={{ fontSize: 11, color: "#9fd9b6", textAlign: "right", marginTop: 2 }}>
+            {m.author === "AI" ? "IA · " : ""}
+            {m.status.toLowerCase()}
+          </div>
+        )}
+        {m.reaction && (
+          <span
+            style={{
+              position: "absolute",
+              bottom: -10,
+              [out ? "left" : "right"]: 8,
+              background: "#0d1320",
+              border: "1px solid var(--border)",
+              borderRadius: 999,
+              padding: "0 5px",
+              fontSize: 13,
+              lineHeight: "18px",
+            }}
+          >
+            {m.reaction}
+          </span>
+        )}
+      </div>
+
+      {/* Disparador de reacción (aparece al pasar el cursor) */}
+      <button
+        className="react-trigger"
+        onClick={() => setPickerOpen((v) => !v)}
+        title="Reaccionar"
+        style={reactTriggerBtn}
+      >
+        ☺
+      </button>
+
+      {pickerOpen && (
+        <div style={emojiPicker}>
+          {REACTIONS.map((e) => (
+            <button
+              key={e}
+              onClick={() => {
+                onReact(m.reaction === e ? "" : e);
+                setPickerOpen(false);
+              }}
+              style={emojiBtn}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const reactTriggerBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "var(--muted)",
+  cursor: "pointer",
+  fontSize: 16,
+  padding: 2,
+};
+
+const emojiPicker: React.CSSProperties = {
+  position: "absolute",
+  top: -42,
+  display: "flex",
+  gap: 2,
+  background: "#0d1320",
+  border: "1px solid var(--border)",
+  borderRadius: 999,
+  padding: "4px 6px",
+  zIndex: 5,
+  boxShadow: "var(--shadow)",
+};
+
+const emojiBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  fontSize: 18,
+  padding: "2px 3px",
+  borderRadius: 6,
+};
+
+const sourceSelect: React.CSSProperties = {
+  background: "#0d1320",
+  color: "var(--text)",
+  border: "1px solid var(--border)",
+  borderRadius: 7,
+  fontSize: 12,
+  padding: "3px 8px",
+};
+
+function tagChip(color: string | null): React.CSSProperties {
+  const bg = color && /^#?[0-9a-fA-F]{3,8}$/.test(color)
+    ? color.startsWith("#") ? color : `#${color}`
+    : "#2c4b7a";
+  return {
+    fontSize: 11,
+    padding: "1px 8px",
+    borderRadius: 999,
+    background: bg,
+    color: "#eaf2ff",
+  };
 }
 
 function sentimentLabel(s: string): string {

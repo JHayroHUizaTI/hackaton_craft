@@ -93,6 +93,11 @@ export function ConversationList({
                     📱 {c.channel.label ?? c.channel.displayPhoneNumber}
                   </span>
                 )}
+                {c.contact.tags.map((t) => (
+                  <span key={t.name} style={badge(tagColor(t.color))}>
+                    {t.name}
+                  </span>
+                ))}
               </div>
             </div>
           </li>
@@ -128,6 +133,13 @@ export function ConversationListSkeleton() {
       ))}
     </ul>
   );
+}
+
+function tagColor(color: string | null): string {
+  if (color && /^#?[0-9a-fA-F]{3,8}$/.test(color)) {
+    return color.startsWith("#") ? color : `#${color}`;
+  }
+  return "#2c4b7a";
 }
 
 function badge(bg: string): React.CSSProperties {

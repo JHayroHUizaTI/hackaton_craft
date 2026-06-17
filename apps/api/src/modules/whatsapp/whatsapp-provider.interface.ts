@@ -46,6 +46,16 @@ export interface WhatsAppProvider {
     fromPhoneNumberId?: string,
   ): Promise<SendResult>;
 
+  /**
+   * Reacciona a un mensaje con un emoji (cadena vacía = quita la reacción).
+   */
+  sendReaction(
+    to: string,
+    targetWaMessageId: string,
+    emoji: string,
+    fromPhoneNumberId?: string,
+  ): Promise<SendResult>;
+
   /** Descarga un medio entrante (por su id de Meta) al almacenamiento. */
   downloadMedia(mediaId: string, fromPhoneNumberId?: string): Promise<DownloadedMedia>;
 }

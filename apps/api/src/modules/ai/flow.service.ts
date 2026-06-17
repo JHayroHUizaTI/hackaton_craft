@@ -20,8 +20,9 @@ export class FlowService {
     flows: FlowSummary[];
     channels: FlowChannelRef[];
     bots: { id: string; name: string }[];
+    agents: { id: string; name: string | null; email: string }[];
   }> {
-    const [rows, channels, bots] = await Promise.all([
+    const [rows, channels, bots, agents] = await Promise.all([
       this.prisma.flow.findMany({
         orderBy: { updatedAt: "desc" },
         include: { channel: true },
@@ -33,6 +34,11 @@ export class FlowService {
       this.prisma.agentConfig.findMany({
         where: { isActive: true },
         select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+      this.prisma.user.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, email: true },
         orderBy: { name: "asc" },
       }),
     ]);
@@ -58,6 +64,7 @@ export class FlowService {
         displayPhoneNumber: c.displayPhoneNumber,
       })),
       bots,
+      agents,
     };
   }
 

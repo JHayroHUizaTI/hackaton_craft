@@ -12,6 +12,14 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
+// ── Registro ─────────────────────────────────────────────────
+export const registerSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  password: z.string().min(8).max(200),
+});
+export type RegisterInput = z.infer<typeof registerSchema>;
+
 // ── Refresh ──────────────────────────────────────────────────
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),

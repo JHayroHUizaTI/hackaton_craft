@@ -2,11 +2,28 @@
 
 import type { Node } from "@xyflow/react";
 import {
+  delayUnits,
   flowActionTypes,
+  httpMethods,
+  type FlowAgentRef,
   type FlowBotRef,
   type FlowBranch,
   type FlowNodeData,
+  type FlowSummary,
 } from "@crm/shared";
+import { NavIcon, type IconName } from "@/components/NavIcons";
+
+const NODE_META: Record<string, { icon: IconName; label: string }> = {
+  start: { icon: "play", label: "Inicio" },
+  sendMessage: { icon: "message", label: "Enviar mensaje" },
+  askQuestion: { icon: "question", label: "Preguntar y guardar" },
+  condition: { icon: "branch", label: "Condición" },
+  action: { icon: "bolt", label: "Acción" },
+  delay: { icon: "clock", label: "Esperar" },
+  http: { icon: "globe", label: "Petición HTTP" },
+  assign: { icon: "user", label: "Asignar a agente" },
+  jumpToFlow: { icon: "jump", label: "Ir a otro flujo" },
+};
 
 const ACTION_LABEL: Record<string, string> = {
   ai: "Pasar a bot IA",
@@ -40,12 +57,16 @@ export function NodeInspector({
   node,
   bots,
   stages,
+  agents,
+  flows,
   onChange,
   onDelete,
 }: {
   node: Node;
   bots: FlowBotRef[];
   stages: { id: string; name: string }[];
+  agents: FlowAgentRef[];
+  flows: FlowSummary[];
   onChange: (data: FlowNodeData) => void;
   onDelete: () => void;
 }) {
@@ -54,7 +75,10 @@ export function NodeInspector({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ fontWeight: 700, fontSize: 14 }}>{titleFor(node.type)}</div>
+      <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+        <NavIcon name={NODE_META[node.type ?? ""]?.icon ?? "bolt"} size={16} />
+        {NODE_META[node.type ?? ""]?.label ?? "Bloque"}
+      </div>
 
       {node.type === "start" && (
         <p style={{ color: "var(--muted)", fontSize: 13 }}>
@@ -169,6 +193,126 @@ export function NodeInspector({
         </>
       )}
 
+      {node.type === "delay" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}>
+            <div style={lbl}>Esperar</div>
+            <input
+              type="number"
+              min={1}
+              style={input}
+              value={data.delayValue ?? 5}
+              onChange={(e) => patch({ delayValue: Number(e.target.value) })}
+            />
+          </div>
+          <select
+            style={{ ...input, width: 120 }}
+            value={data.delayUnit ?? "minutes"}
+            onChange={(e) => patch({ delayUnit: e.target.value as FlowNodeData["delayUnit"] })}
+          >
+            {delayUnits.map((u) => (
+              <option key={u} value={u}>
+                {u === "hours" ? "horas" : "minutos"}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {node.type === "http" && (
+        <>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ width: 110 }}>
+              <div style={lbl}>Método</div>
+              <select
+                style={input}
+                value={data.method ?? "POST"}
+                onChange={(e) => patch({ method: e.target.value as FlowNodeData["method"] })}
+              >
+                {httpMethods.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={lbl}>URL</div>
+              <input
+                style={input}
+                value={data.url ?? ""}
+                placeholder="https://tu-n8n.com/webhook/..."
+                onChange={(e) => patch({ url: e.target.value })}
+              />
+            </div>
+          </div>
+          <Field label="Cabeceras (JSON, opcional)">
+            <textarea
+              style={{ ...input, minHeight: 50, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+              value={data.headers ?? ""}
+              placeholder={'{ "Authorization": "Bearer ..." }'}
+              onChange={(e) => patch({ headers: e.target.value })}
+            />
+          </Field>
+          <Field label="Cuerpo (admite {{variables}}, opcional)">
+            <textarea
+              style={{ ...input, minHeight: 60, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+              value={data.httpBody ?? ""}
+              placeholder={'{ "telefono": "{{telefono}}" }'}
+              onChange={(e) => patch({ httpBody: e.target.value })}
+            />
+          </Field>
+          <Field label="Guardar respuesta en variable (opcional)">
+            <input
+              style={input}
+              value={data.saveAs ?? ""}
+              placeholder="respuesta_api"
+              onChange={(e) => patch({ saveAs: e.target.value.replace(/[^\w]/g, "") })}
+            />
+          </Field>
+        </>
+      )}
+
+      {node.type === "assign" && (
+        <Field label="Asignar la conversación a">
+          <select
+            style={input}
+            value={data.agentId ?? ""}
+            onChange={(e) => {
+              const a = agents.find((x) => x.id === e.target.value);
+              patch({ agentId: e.target.value || null, agentName: a?.name ?? a?.email });
+            }}
+          >
+            <option value="">Elige un agente…</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name ?? a.email}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+
+      {node.type === "jumpToFlow" && (
+        <Field label="Continuar en el flujo">
+          <select
+            style={input}
+            value={data.flowId ?? ""}
+            onChange={(e) => {
+              const f = flows.find((x) => x.id === e.target.value);
+              patch({ flowId: e.target.value, flowName: f?.name });
+            }}
+          >
+            <option value="">Elige un flujo…</option>
+            {flows.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+
       {node.type !== "start" && (
         <button
           onClick={onDelete}
@@ -259,21 +403,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
-}
-
-function titleFor(type: string | undefined): string {
-  switch (type) {
-    case "start":
-      return "● Inicio";
-    case "sendMessage":
-      return "💬 Enviar mensaje";
-    case "askQuestion":
-      return "❓ Preguntar y guardar";
-    case "condition":
-      return "🔀 Condición";
-    case "action":
-      return "⚡ Acción";
-    default:
-      return "Bloque";
-  }
 }

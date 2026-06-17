@@ -170,17 +170,42 @@ export function WhatsAppConnect() {
       </div>
 
       {!missingConfig && list.length > 0 && (
-        <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
-          Al conectar aceptas nuestra{" "}
-          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: "#25d366" }}>
-            Política de Privacidad
-          </a>
-          .
-        </p>
+        <>
+          <div style={syncNote}>
+            <strong style={{ color: "var(--text)" }}>
+              Sincronización bidireccional activa
+            </strong>
+            <p style={{ margin: "6px 0 0" }}>
+              Los mensajes que escribas desde la app de WhatsApp en el celular
+              también aparecen en el CRM, y la IA se pausa automáticamente cuando
+              respondes tú. Para que funcione, en Meta → WhatsApp → Configuración →
+              Webhooks, suscribe los campos <code>messages</code> y{" "}
+              <code>message_echoes</code>.
+            </p>
+          </div>
+          <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
+            Al conectar aceptas nuestra{" "}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: "#25d366" }}>
+              Política de Privacidad
+            </a>
+            .
+          </p>
+        </>
       )}
     </div>
   );
 }
+
+const syncNote: React.CSSProperties = {
+  marginTop: 16,
+  padding: 14,
+  borderRadius: 10,
+  border: "1px solid #1f6f46",
+  background: "rgba(37,211,102,0.07)",
+  color: "var(--muted)",
+  fontSize: 13,
+  lineHeight: 1.6,
+};
 
 function ChannelRow({
   channel,

@@ -7,6 +7,7 @@ import { AgentConfigService } from "./agent-config.service";
 import { BotService } from "./bot.service";
 import { FlowService } from "./flow.service";
 import { FlowEngineService } from "./flow-engine.service";
+import { FlowProcessor } from "./flow.processor";
 import { AiController } from "./ai.controller";
 import { AgentConfigController } from "./agent-config.controller";
 import { BotsController } from "./bots.controller";
@@ -30,6 +31,7 @@ import { KnowledgeModule } from "../knowledge/knowledge.module";
     BotService,
     FlowService,
     FlowEngineService,
+    FlowProcessor,
   ],
 })
 export class AiModule {}

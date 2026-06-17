@@ -18,22 +18,29 @@ import "@xyflow/react/dist/style.css";
 import {
   flowTriggerTypes,
   type CreateFlowInput,
+  type FlowAgentRef,
   type FlowBotRef,
   type FlowChannelRef,
   type FlowEdge,
   type FlowNode,
   type FlowNodeData,
   type FlowNodeType,
+  type FlowSummary,
 } from "@crm/shared";
 import { createFlow, fetchFlow, updateFlow } from "@/lib/bff";
+import { NavIcon, type IconName } from "@/components/NavIcons";
 import { nodeTypes } from "./FlowNodes";
 import { NodeInspector } from "./NodeInspector";
 
-const PALETTE: { type: FlowNodeType; label: string }[] = [
-  { type: "sendMessage", label: "💬 Enviar mensaje" },
-  { type: "askQuestion", label: "❓ Preguntar y guardar" },
-  { type: "condition", label: "🔀 Condición" },
-  { type: "action", label: "⚡ Acción" },
+const PALETTE: { type: FlowNodeType; label: string; icon: IconName }[] = [
+  { type: "sendMessage", label: "Enviar mensaje", icon: "message" },
+  { type: "askQuestion", label: "Preguntar y guardar", icon: "question" },
+  { type: "condition", label: "Condición", icon: "branch" },
+  { type: "action", label: "Acción", icon: "bolt" },
+  { type: "delay", label: "Esperar", icon: "clock" },
+  { type: "http", label: "Petición HTTP", icon: "globe" },
+  { type: "assign", label: "Asignar a agente", icon: "user" },
+  { type: "jumpToFlow", label: "Ir a otro flujo", icon: "jump" },
 ];
 
 function defaultData(type: FlowNodeType): FlowNodeData {
@@ -46,6 +53,12 @@ function defaultData(type: FlowNodeType): FlowNodeData {
       return { branches: [] };
     case "action":
       return { action: "ai", botId: null };
+    case "delay":
+      return { delayValue: 5, delayUnit: "minutes" };
+    case "http":
+      return { method: "POST", url: "" };
+    case "assign":
+      return { agentId: null };
     default:
       return {};
   }
@@ -56,12 +69,16 @@ export function FlowBuilder({
   channels,
   bots,
   stages,
+  agents,
+  flows,
   onBack,
 }: {
   flowId: string | null; // null = nuevo
   channels: FlowChannelRef[];
   bots: FlowBotRef[];
   stages: { id: string; name: string }[];
+  agents: FlowAgentRef[];
+  flows: FlowSummary[];
   onBack: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -254,6 +271,7 @@ export function FlowBuilder({
           </div>
           {PALETTE.map((p) => (
             <button key={p.type} onClick={() => addNode(p.type)} style={paletteBtn}>
+              <NavIcon name={p.icon} size={16} />
               {p.label}
             </button>
           ))}
@@ -286,6 +304,8 @@ export function FlowBuilder({
               node={selectedNode}
               bots={bots}
               stages={stages}
+              agents={agents}
+              flows={flows.filter((f) => f.id !== flowId)}
               onChange={updateNodeData}
               onDelete={deleteSelected}
             />
@@ -356,6 +376,9 @@ const primary: React.CSSProperties = {
 };
 
 const paletteBtn: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
   padding: "10px 12px",
   borderRadius: 8,
   border: "1px solid var(--border)",
