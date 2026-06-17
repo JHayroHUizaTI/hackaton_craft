@@ -8,7 +8,7 @@ COPY apps/api/package*.json apps/api/
 RUN npm ci
 
 # Copiar fuentes
-COPY turbo.json ./
+COPY turbo.json tsconfig.base.json ./
 COPY packages/shared/ packages/shared/
 COPY apps/api/ apps/api/
 

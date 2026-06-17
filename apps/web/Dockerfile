@@ -20,7 +20,7 @@ COPY apps/web/package*.json apps/web/
 RUN npm ci
 
 # Copiar fuentes
-COPY turbo.json ./
+COPY turbo.json tsconfig.base.json ./
 COPY packages/shared/ packages/shared/
 COPY apps/web/ apps/web/
 
