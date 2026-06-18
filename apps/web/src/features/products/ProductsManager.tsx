@@ -10,7 +10,15 @@ import {
   updateProduct,
 } from "@/lib/bff";
 
-export function ProductsManager({ isAdmin }: { isAdmin: boolean }) {
+function formatPrice(price: number, currency: string): string {
+  try {
+    return price.toLocaleString("es", { style: "currency", currency });
+  } catch {
+    return `${price.toFixed(2)} ${currency}`;
+  }
+}
+
+export function ProductsManager() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<ProductDto | "new" | null>(null);
@@ -35,14 +43,12 @@ export function ProductsManager({ isAdmin }: { isAdmin: boolean }) {
           placeholder="Buscar por nombre o SKU…"
           onChange={(e) => setSearch(e.target.value)}
         />
-        {isAdmin && (
-          <button onClick={() => setEditing("new")} style={primaryBtn}>
-            + Nuevo producto
-          </button>
-        )}
+        <button onClick={() => setEditing("new")} style={primaryBtn}>
+          + Nuevo producto
+        </button>
       </div>
 
-      {editing && isAdmin && (
+      {editing && (
         <ProductForm
           product={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
@@ -73,28 +79,26 @@ export function ProductsManager({ isAdmin }: { isAdmin: boolean }) {
               </div>
               {p.sku && <div style={{ ...muted, fontSize: 12 }}>SKU: {p.sku}</div>}
               <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6, color: "#7ee2a8" }}>
-                {p.price.toLocaleString("es", { style: "currency", currency: p.currency })}
+                {formatPrice(p.price, p.currency)}
               </div>
               {p.description && (
                 <p style={{ ...muted, fontSize: 13, marginTop: 6, marginBottom: 0 }}>
                   {p.description}
                 </p>
               )}
-              {isAdmin && (
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                  <button onClick={() => setEditing(p)} style={ghostBtn}>
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm(`¿Eliminar "${p.name}"?`)) remove.mutate(p.id);
-                    }}
-                    style={{ ...ghostBtn, color: "#e08a8a", borderColor: "#5a2a2a" }}
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button onClick={() => setEditing(p)} style={ghostBtn}>
+                  Editar
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`¿Eliminar "${p.name}"?`)) remove.mutate(p.id);
+                  }}
+                  style={{ ...ghostBtn, color: "#e08a8a", borderColor: "#5a2a2a" }}
+                >
+                  Eliminar
+                </button>
+              </div>
             </div>
           </div>
         ))}

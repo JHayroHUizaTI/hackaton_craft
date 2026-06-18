@@ -12,3 +12,4 @@ export * from "./schemas/campaign.schema.js";
 export * from "./schemas/source.schema.js";
 export * from "./schemas/product.schema.js";
 export * from "./schemas/contact.schema.js";
+export * from "./schemas/lead-webhook.schema.js";

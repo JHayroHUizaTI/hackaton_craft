@@ -12,12 +12,51 @@ export const contactListItemSchema = z.object({
   source: z
     .object({ id: z.string(), name: z.string(), color: z.string().nullable() })
     .nullable(),
+  // Valores de campos personalizados (key → valor).
+  fields: z.record(z.string()).default({}),
 });
 export type ContactListItem = z.infer<typeof contactListItemSchema>;
 
-// Editar datos básicos de un contacto.
+// Editar datos básicos de un contacto (+ campos personalizados).
 export const updateContactSchema = z.object({
   name: z.string().max(160).nullable().optional(),
   optIn: z.boolean().optional(),
+  fields: z.record(z.string()).optional(), // se fusionan en metadata
 });
 export type UpdateContactInput = z.infer<typeof updateContactSchema>;
+
+// ── Campos personalizados (definiciones) ─────────────────────
+export const customFieldTypes = ["text", "number", "date", "select"] as const;
+export type CustomFieldType = (typeof customFieldTypes)[number];
+
+export const customFieldDtoSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  label: z.string(),
+  type: z.enum(customFieldTypes),
+  options: z.array(z.string()),
+  order: z.number(),
+});
+export type CustomFieldDto = z.infer<typeof customFieldDtoSchema>;
+
+export const createCustomFieldSchema = z.object({
+  label: z.string().min(1).max(80),
+  type: z.enum(customFieldTypes).default("text"),
+  options: z.array(z.string()).default([]),
+});
+export type CreateCustomFieldInput = z.infer<typeof createCustomFieldSchema>;
+
+export const updateCustomFieldSchema = z.object({
+  label: z.string().min(1).max(80).optional(),
+  options: z.array(z.string()).optional(),
+  order: z.number().int().optional(),
+});
+export type UpdateCustomFieldInput = z.infer<typeof updateCustomFieldSchema>;
+
+// Crear un contacto manualmente.
+export const createContactSchema = z.object({
+  name: z.string().max(160).nullable().default(null),
+  phone: z.string().min(6).max(24),
+  sourceId: z.string().nullable().default(null),
+});
+export type CreateContactInput = z.infer<typeof createContactSchema>;

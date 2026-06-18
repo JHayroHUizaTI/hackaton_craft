@@ -53,6 +53,8 @@ services:
       # Credenciales del admin inicial (las usa el seed).
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@crm.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin1234}
+      # Token del webhook de leads entrantes.
+      LEAD_WEBHOOK_TOKEN: ${LEAD_WEBHOOK_TOKEN}
     # Sin "ports": Nginx Proxy Manager lo alcanza por la red "proxy" como crm-api:3001.
     expose:
       - "3001"

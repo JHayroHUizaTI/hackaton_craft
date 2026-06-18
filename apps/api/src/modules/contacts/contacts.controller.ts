@@ -1,19 +1,24 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Get,
   NotFoundException,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
 import {
+  createContactSchema,
   updateContactSchema,
   type ContactDto,
   type ContactListItem,
+  type CreateContactInput,
   type UpdateContactInput,
 } from "@crm/shared";
+import type { Prisma } from "@prisma/client";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { PrismaService } from "../../infra/prisma/prisma.service";
@@ -56,7 +61,23 @@ export class ContactsController {
       source: c.source
         ? { id: c.source.id, name: c.source.name, color: c.source.color }
         : null,
+      fields: this.fieldsFrom(c.metadata),
     }));
+  }
+
+  @Post()
+  async create(
+    @Body(new ZodValidationPipe(createContactSchema)) body: CreateContactInput,
+  ): Promise<{ id: string }> {
+    const phone = body.phone.trim();
+    const existing = await this.prisma.contact.findUnique({ where: { phone } });
+    if (existing) {
+      throw new ConflictException("Ya existe un contacto con ese teléfono");
+    }
+    const c = await this.prisma.contact.create({
+      data: { phone, name: body.name, sourceId: body.sourceId },
+    });
+    return { id: c.id };
   }
 
   @Patch(":id")
@@ -66,14 +87,35 @@ export class ContactsController {
   ): Promise<{ ok: true }> {
     const existing = await this.prisma.contact.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Contacto no encontrado");
+
+    // Campos personalizados: fusionar con la metadata existente.
+    const metadata =
+      body.fields !== undefined
+        ? ({
+            ...this.fieldsFrom(existing.metadata),
+            ...body.fields,
+          } as Prisma.InputJsonValue)
+        : undefined;
+
     await this.prisma.contact.update({
       where: { id },
       data: {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.optIn !== undefined ? { optIn: body.optIn } : {}),
+        ...(metadata !== undefined ? { metadata } : {}),
       },
     });
     return { ok: true };
+  }
+
+  private fieldsFrom(metadata: unknown): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (metadata && typeof metadata === "object") {
+      for (const [k, v] of Object.entries(metadata as Record<string, unknown>)) {
+        if (v != null) out[k] = String(v);
+      }
+    }
+    return out;
   }
 
   private searchWhere(search: string) {

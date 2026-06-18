@@ -28,41 +28,17 @@ import {
   type FlowSummary,
 } from "@crm/shared";
 import { createFlow, fetchFlow, updateFlow } from "@/lib/bff";
-import { NavIcon, type IconName } from "@/components/NavIcons";
+import { NavIcon } from "@/components/NavIcons";
 import { nodeTypes } from "./FlowNodes";
 import { NodeInspector } from "./NodeInspector";
-
-const PALETTE: { type: FlowNodeType; label: string; icon: IconName }[] = [
-  { type: "sendMessage", label: "Enviar mensaje", icon: "message" },
-  { type: "askQuestion", label: "Preguntar y guardar", icon: "question" },
-  { type: "condition", label: "Condición", icon: "branch" },
-  { type: "action", label: "Acción", icon: "bolt" },
-  { type: "delay", label: "Esperar", icon: "clock" },
-  { type: "http", label: "Petición HTTP", icon: "globe" },
-  { type: "assign", label: "Asignar a agente", icon: "user" },
-  { type: "jumpToFlow", label: "Ir a otro flujo", icon: "jump" },
-];
-
-function defaultData(type: FlowNodeType): FlowNodeData {
-  switch (type) {
-    case "sendMessage":
-      return { text: "" };
-    case "askQuestion":
-      return { text: "", variable: "" };
-    case "condition":
-      return { branches: [] };
-    case "action":
-      return { action: "ai", botId: null };
-    case "delay":
-      return { delayValue: 5, delayUnit: "minutes" };
-    case "http":
-      return { method: "POST", url: "" };
-    case "assign":
-      return { agentId: null };
-    default:
-      return {};
-  }
-}
+import {
+  FlowActionsContext,
+  NODE_PALETTE,
+  defaultNodeData,
+  outgoingKey,
+  type AddNextFn,
+  type FlowActions,
+} from "./flowShared";
 
 export function FlowBuilder({
   flowId,
@@ -122,7 +98,18 @@ export function FlowBuilder({
   }, [isNew, loaded, setNodes, setEdges]);
 
   const onConnect = useCallback(
-    (c: Connection) => setEdges((eds) => addEdge({ ...c, label: c.sourceHandle ?? undefined }, eds)),
+    (c: Connection) =>
+      setEdges((eds) => {
+        // Una salida (source + handle) solo puede tener una arista: reemplaza.
+        const filtered = eds.filter(
+          (e) =>
+            !(
+              e.source === c.source &&
+              (e.sourceHandle ?? null) === (c.sourceHandle ?? null)
+            ),
+        );
+        return addEdge({ ...c, label: c.sourceHandle ?? undefined }, filtered);
+      }),
     [setEdges],
   );
 
@@ -132,11 +119,40 @@ export function FlowBuilder({
       id,
       type,
       position: { x: 120 + Math.random() * 120, y: 160 + Math.random() * 160 },
-      data: defaultData(type) as Record<string, unknown>,
+      data: defaultNodeData(type) as Record<string, unknown>,
     };
     setNodes((nds) => [...nds, node]);
     setSelectedId(id);
   }
+
+  // "+" en un nodo: crea el bloque siguiente ya conectado y lo selecciona.
+  const addNext = useCallback<AddNextFn>(
+    ({ sourceId, sourceHandle, pos, type }) => {
+      const id = `n_${Date.now()}_${idCounter.current++}`;
+      const position = {
+        x: pos.x + (sourceHandle ? 300 : 0),
+        y: pos.y + 150,
+      };
+      setNodes((nds) => [
+        ...nds,
+        { id, type, position, data: defaultNodeData(type) as Record<string, unknown> },
+      ]);
+      setEdges((eds) =>
+        addEdge(
+          {
+            id: `xy-${sourceId}-${id}`,
+            source: sourceId,
+            target: id,
+            sourceHandle: sourceHandle ?? null,
+            label: sourceHandle ?? undefined,
+          },
+          eds,
+        ),
+      );
+      setSelectedId(id);
+    },
+    [setNodes, setEdges],
+  );
 
   function updateNodeData(data: FlowNodeData) {
     if (!selectedId) return;
@@ -160,6 +176,19 @@ export function FlowBuilder({
     () => nodes.find((n) => n.id === selectedId) ?? null,
     [nodes, selectedId],
   );
+
+  // Valor del contexto: addNext + qué salidas ya están enlazadas (reactivo a
+  // las aristas, para que el "+" desaparezca al conectar y reaparezca al borrar).
+  const flowActions = useMemo<FlowActions>(() => {
+    const taken = new Set(
+      edges.map((e) => outgoingKey(e.source, e.sourceHandle)),
+    );
+    return {
+      addNext,
+      isOutgoingTaken: (sourceId, sourceHandle) =>
+        taken.has(outgoingKey(sourceId, sourceHandle)),
+    };
+  }, [edges, addNext]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -269,7 +298,7 @@ export function FlowBuilder({
           <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
             Arrastra el lienzo, conecta los ● y añade bloques:
           </div>
-          {PALETTE.map((p) => (
+          {NODE_PALETTE.map((p) => (
             <button key={p.type} onClick={() => addNode(p.type)} style={paletteBtn}>
               <NavIcon name={p.icon} size={16} />
               {p.label}
@@ -279,22 +308,24 @@ export function FlowBuilder({
 
         {/* Lienzo */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={(_, n) => setSelectedId(n.id)}
-            onPaneClick={() => setSelectedId(null)}
-            nodeTypes={nodeTypes}
-            fitView
-            colorMode="dark"
-          >
-            <Background />
-            <Controls />
-            <MiniMap pannable zoomable />
-          </ReactFlow>
+          <FlowActionsContext.Provider value={flowActions}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onNodeClick={(_, n) => setSelectedId(n.id)}
+              onPaneClick={() => setSelectedId(null)}
+              nodeTypes={nodeTypes}
+              fitView
+              colorMode="dark"
+            >
+              <Background />
+              <Controls />
+              <MiniMap pannable zoomable />
+            </ReactFlow>
+          </FlowActionsContext.Provider>
         </div>
 
         {/* Inspector */}

@@ -13,7 +13,6 @@ import {
 import {
   createProductSchema,
   updateProductSchema,
-  Role,
   type CreateProductInput,
   type ProductDto,
   type UpdateProductInput,
@@ -21,8 +20,6 @@ import {
 import type { Prisma } from "@prisma/client";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
-import { RolesGuard } from "../../common/guards/roles.guard";
-import { Roles } from "../../common/decorators/roles.decorator";
 import { PrismaService } from "../../infra/prisma/prisma.service";
 
 @Controller("products")
@@ -48,8 +45,6 @@ export class ProductsController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN)
   async create(
     @Body(new ZodValidationPipe(createProductSchema)) body: CreateProductInput,
   ): Promise<ProductDto> {
@@ -68,8 +63,6 @@ export class ProductsController {
   }
 
   @Patch(":id")
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN)
   async update(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateProductSchema)) body: UpdateProductInput,
@@ -92,8 +85,6 @@ export class ProductsController {
   }
 
   @Delete(":id")
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN)
   async remove(@Param("id") id: string): Promise<{ ok: true }> {
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Producto no encontrado");

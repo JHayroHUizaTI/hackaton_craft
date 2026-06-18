@@ -256,6 +256,20 @@ model Contact {
   @@map("contacts")
 }
 
+// Campos personalizados de los contactos/leads. Los valores por contacto se
+// guardan en Contact.metadata (JSON), indexados por `key`.
+model CustomField {
+  id        String   @id @default(cuid())
+  key       String   @unique // clave usada en Contact.metadata
+  label     String
+  type      String   @default("text") // text | number | date | select
+  options   String[] // opciones cuando type = select
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@map("custom_fields")
+}
+
 // ─────────────────────────────────────────────────────────────
 // Catálogo de productos / servicios
 // ─────────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
 import { CampaignsModule } from "./modules/campaigns/campaigns.module";
 import { SourcesModule } from "./modules/sources/sources.module";
 import { ProductsModule } from "./modules/products/products.module";
+import { LeadsModule } from "./modules/leads/leads.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthController } from "./health.controller";
     CampaignsModule,
     SourcesModule,
     ProductsModule,
+    LeadsModule,
   ],
   controllers: [HealthController],
 })

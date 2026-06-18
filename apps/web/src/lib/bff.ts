@@ -47,6 +47,10 @@ import type {
   UpdateProductInput,
   ContactListItem,
   UpdateContactInput,
+  CreateContactInput,
+  CustomFieldDto,
+  CreateCustomFieldInput,
+  UpdateCustomFieldInput,
 } from "@crm/shared";
 
 // Fetchers del lado del cliente: llaman al BFF (mismo origen, cookie httpOnly).
@@ -577,6 +581,58 @@ export async function updateContact(
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error("No se pudo guardar el contacto");
+}
+
+export async function createContact(
+  input: CreateContactInput,
+): Promise<{ id: string }> {
+  const res = await fetch("/api/bff/contacts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo crear el contacto");
+  }
+  return res.json();
+}
+
+// ── Campos personalizados ────────────────────────────────────
+export async function fetchCustomFields(): Promise<CustomFieldDto[]> {
+  const res = await fetch("/api/bff/custom-fields");
+  if (!res.ok) throw new Error("No se pudieron cargar los campos");
+  return res.json();
+}
+
+export async function createCustomField(
+  input: CreateCustomFieldInput,
+): Promise<CustomFieldDto> {
+  const res = await fetch("/api/bff/custom-fields", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo crear el campo");
+  return res.json();
+}
+
+export async function updateCustomField(
+  id: string,
+  input: UpdateCustomFieldInput,
+): Promise<CustomFieldDto> {
+  const res = await fetch(`/api/bff/custom-fields/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar el campo");
+  return res.json();
+}
+
+export async function deleteCustomField(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/custom-fields/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo eliminar el campo");
 }
 
 // ── Productos ────────────────────────────────────────────────

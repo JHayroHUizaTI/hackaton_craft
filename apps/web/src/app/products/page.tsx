@@ -10,7 +10,7 @@ export default async function ProductsPage() {
 
   return (
     <AppShell email={session.user?.email ?? ""} role={role} active="products">
-      <ProductsManager isAdmin={role === "ADMIN"} />
+      <ProductsManager />
     </AppShell>
   );
 }
