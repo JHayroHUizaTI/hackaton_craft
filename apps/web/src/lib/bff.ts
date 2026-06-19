@@ -35,6 +35,8 @@ import type {
   FlowDto,
   CreateFlowInput,
   UpdateFlowInput,
+  PlaygroundRequest,
+  PlaygroundReply,
   TemplateDto,
   CreateTemplateInput,
   UpdateTemplateInput,
@@ -273,6 +275,19 @@ export async function deleteBot(id: string): Promise<void> {
     const b = (await res.json().catch(() => null)) as { message?: string } | null;
     throw new Error(b?.message ?? "No se pudo eliminar el bot");
   }
+}
+
+// Playground: probar el agente IA sin enviar nada por WhatsApp.
+export async function testAgent(
+  input: PlaygroundRequest,
+): Promise<PlaygroundReply> {
+  const res = await fetch("/api/bff/bots/playground", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, "No se pudo probar el agente"));
+  return res.json();
 }
 
 // ── Flujos (constructor visual) ──────────────────────────────

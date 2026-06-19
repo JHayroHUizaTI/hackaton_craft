@@ -28,3 +28,31 @@ export const aiSuggestionSchema = z.object({
   toolsUsed: z.array(z.string()),
 });
 export type AiSuggestion = z.infer<typeof aiSuggestionSchema>;
+
+// ── Playground: probar el agente IA sin enviar nada ──────────
+export const playgroundTurnSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+});
+export type PlaygroundTurn = z.infer<typeof playgroundTurnSchema>;
+
+export const playgroundRequestSchema = z.object({
+  message: z.string().min(1).max(4000),
+  botId: z.string().optional(), // bot a probar; si falta, usa el por defecto
+  // Historial de la conversación de prueba (sin contar el mensaje actual).
+  history: z.array(playgroundTurnSchema).max(40).default([]),
+});
+export type PlaygroundRequest = z.infer<typeof playgroundRequestSchema>;
+
+export const playgroundReplySchema = z.object({
+  reply: z.string().nullable(),
+  escalate: z.boolean(),
+  escalationReason: z.string().nullable(),
+  model: z.string(),
+  provider: z.string(),
+  toolsUsed: z.array(z.string()),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  costUsd: z.number(),
+});
+export type PlaygroundReply = z.infer<typeof playgroundReplySchema>;

@@ -71,30 +71,7 @@ export function Inbox() {
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {REPLY_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setReply(f.key)}
-                style={chip(reply === f.key)}
-              >
-                {f.dot && (
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: f.dot,
-                      marginRight: 5,
-                      verticalAlign: "middle",
-                    }}
-                  />
-                )}
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <ReplySwitch value={reply} onChange={setReply} />
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as StatusFilter)}
@@ -131,6 +108,100 @@ export function Inbox() {
       </main>
     </div>
   );
+}
+
+// Switch segmentado para el filtro de respuesta (Todas / Sin responder /
+// Respondidas) con indicador deslizante.
+function ReplySwitch({
+  value,
+  onChange,
+}: {
+  value: ReplyFilter;
+  onChange: (v: ReplyFilter) => void;
+}) {
+  const index = REPLY_FILTERS.findIndex((f) => f.key === value);
+
+  return (
+    <div style={switchTrack} role="tablist" aria-label="Filtrar por respuesta">
+      <span
+        aria-hidden
+        style={{
+          ...switchThumb,
+          transform: `translateX(${index * 100}%)`,
+        }}
+      />
+      {REPLY_FILTERS.map((f) => {
+        const active = f.key === value;
+        return (
+          <button
+            key={f.key}
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(f.key)}
+            style={switchSeg(active)}
+          >
+            {f.dot && (
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: f.dot,
+                  flexShrink: 0,
+                }}
+              />
+            )}
+            {f.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const switchTrack: React.CSSProperties = {
+  position: "relative",
+  display: "grid",
+  gridTemplateColumns: `repeat(${REPLY_FILTERS.length}, 1fr)`,
+  padding: 3,
+  borderRadius: 999,
+  background: "var(--field)",
+  border: "1px solid var(--border)",
+};
+
+const switchThumb: React.CSSProperties = {
+  position: "absolute",
+  top: 3,
+  left: 3,
+  width: `calc((100% - 6px) / ${REPLY_FILTERS.length})`,
+  height: "calc(100% - 6px)",
+  borderRadius: 999,
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
+  transition: "transform 0.22s cubic-bezier(0.22,1,0.36,1)",
+  pointerEvents: "none",
+};
+
+function switchSeg(active: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    zIndex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "none",
+    background: "transparent",
+    color: active ? "var(--text)" : "var(--muted)",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    transition: "color 0.18s ease",
+  };
 }
 
 const listPane: React.CSSProperties = {

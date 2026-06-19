@@ -6,6 +6,7 @@ import { confirmDialog } from "@/lib/confirm";
 import type { BotDto } from "@crm/shared";
 import { deleteBot, fetchBots } from "@/lib/bff";
 import { BotEditor } from "./BotEditor";
+import { AgentPlayground } from "./AgentPlayground";
 import { primaryBtn } from "./styles";
 
 type Selection = { kind: "none" } | { kind: "new" } | { kind: "edit"; id: string };
@@ -17,6 +18,9 @@ export function BotsManager() {
     queryFn: fetchBots,
   });
   const [sel, setSel] = useState<Selection>({ kind: "none" });
+  const [testing, setTesting] = useState<{ id?: string; name?: string } | null>(
+    null,
+  );
 
   const remove = useMutation({
     mutationFn: deleteBot,
@@ -68,6 +72,9 @@ export function BotsManager() {
               Selecciona un bot para editarlo o crea uno nuevo. Cada bot puede
               atender un número de WhatsApp distinto.
             </p>
+            <button onClick={() => setTesting({})} style={testBtn}>
+              🧪 Probar el bot por defecto
+            </button>
           </div>
         )}
 
@@ -89,6 +96,15 @@ export function BotsManager() {
             <div style={detailHead}>
               <h2 style={detailTitle}>{selectedBot.name}</h2>
               {selectedBot.isDefault && <span style={badge("#1f5a6f")}>por defecto</span>}
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() =>
+                  setTesting({ id: selectedBot.id, name: selectedBot.name })
+                }
+                style={testBtn}
+              >
+                🧪 Probar
+              </button>
             </div>
             <BotEditor
               key={selectedBot.id}
@@ -107,6 +123,14 @@ export function BotsManager() {
           </>
         )}
       </section>
+
+      {testing && (
+        <AgentPlayground
+          botId={testing.id}
+          botName={testing.name}
+          onClose={() => setTesting(null)}
+        />
+      )}
     </div>
   );
 }
@@ -184,6 +208,18 @@ const detailHead: React.CSSProperties = {
 };
 
 const detailTitle: React.CSSProperties = { margin: 0, fontSize: 20 };
+
+const testBtn: React.CSSProperties = {
+  padding: "8px 14px",
+  borderRadius: 8,
+  border: "1px solid #3a4a6a",
+  background: "#16203a",
+  color: "#a9c3ff",
+  fontWeight: 600,
+  cursor: "pointer",
+  fontSize: 13,
+  whiteSpace: "nowrap",
+};
 
 const empty: React.CSSProperties = {
   display: "flex",

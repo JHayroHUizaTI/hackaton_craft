@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import type { AiSuggestion, Classification } from "@crm/shared";
+import type {
+  AiSuggestion,
+  Classification,
+  PlaygroundReply,
+  PlaygroundRequest,
+} from "@crm/shared";
 import { PrismaService } from "../../infra/prisma/prisma.service";
 import { KnowledgeService } from "../knowledge/knowledge.service";
 import { BotService } from "./bot.service";
@@ -199,6 +204,116 @@ export class AgentService {
     };
   }
 
+  // ── Playground: probar el agente con texto libre, sin persistir ─
+  // No crea conversación, ni AiRun, ni envía nada. Reutiliza la config del bot
+  // (prompt, herramientas, modelo) para que el resultado sea fiel al real.
+  async playground(input: PlaygroundRequest): Promise<PlaygroundReply> {
+    const config = input.botId
+      ? await this.prisma.agentConfig.findUnique({ where: { id: input.botId } })
+      : await this.bots.resolveForChannel(null);
+
+    const contact = { name: "Cliente de prueba", phone: "+000000000" };
+    const system = this.buildSystem(config?.systemPrompt, contact);
+    const tools = resolveTools(config?.enabledTools ?? []);
+    const maxIterations = config?.maxIterations ?? 6;
+    const effort = config?.effort ?? "medium";
+
+    const messages: LlmMessage[] = [
+      ...input.history.map((h) => ({ role: h.role, content: h.content })),
+      { role: "user" as const, content: input.message },
+    ];
+    // La API exige que el primer mensaje sea del usuario.
+    while (messages.length && messages[0]!.role === "assistant") messages.shift();
+
+    const ragEnabled = (config?.enabledTools ?? []).includes("search_knowledge");
+    const knowledge = ragEnabled ? await this.retrieveSafe(input.message) : [];
+
+    let reply: string | null = null;
+    let escalate = false;
+    let escalationReason: string | null = null;
+    let model = config?.model ?? "claude-opus-4-8";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const toolsUsed: string[] = [];
+
+    try {
+      for (let i = 0; i < maxIterations; i++) {
+        const res = await this.llm.generate({
+          system,
+          messages,
+          tools: tools.length ? tools : undefined,
+          knowledge: knowledge.length ? knowledge : undefined,
+          effort,
+          maxTokens: 1024,
+        });
+        inputTokens += res.usage.inputTokens;
+        outputTokens += res.usage.outputTokens;
+        model = res.model;
+
+        if (res.stopReason === "refusal") {
+          escalate = true;
+          escalationReason = "El modelo rechazó la solicitud (safety).";
+          break;
+        }
+
+        const toolUses = res.content.filter(
+          (b): b is LlmToolUseBlock => b.type === "tool_use",
+        );
+
+        if (toolUses.length === 0) {
+          reply = res.content
+            .filter((b) => b.type === "text")
+            .map((b) => (b as { text: string }).text)
+            .join("")
+            .trim();
+          break;
+        }
+
+        messages.push({ role: "assistant", content: res.content });
+        const results: LlmToolResultBlock[] = [];
+        for (const tu of toolUses) {
+          toolsUsed.push(tu.name);
+          const { output, escalated, reason } = await this.runTool(
+            null,
+            { ...contact, id: "playground", optIn: true, lastMessageAt: null },
+            tu,
+          );
+          if (escalated) {
+            escalate = true;
+            escalationReason = reason ?? "Escalado por la IA.";
+          }
+          results.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: output,
+          });
+        }
+        messages.push({ role: "user", content: results });
+      }
+    } catch (e) {
+      this.logger.error(`Fallo del playground: ${(e as Error).message}`);
+      escalate = true;
+      escalationReason = "Error al generar la respuesta.";
+    }
+
+    return {
+      reply,
+      escalate,
+      escalationReason,
+      model,
+      provider: this.llm.name,
+      toolsUsed: [
+        ...new Set([
+          ...toolsUsed,
+          ...(knowledge.length ? ["search_knowledge"] : []),
+        ]),
+      ],
+      inputTokens,
+      outputTokens,
+      costUsd: this.cost(model, inputTokens, outputTokens),
+    };
+  }
+
   private async retrieveSafe(query: string): Promise<string[]> {
     try {
       return await this.knowledge.retrieve(query, 3);
@@ -229,7 +344,7 @@ export class AgentService {
 
   // ── Herramientas ───────────────────────────────────────────────
   private async runTool(
-    aiRunId: string,
+    aiRunId: string | null,
     contact: {
       id: string;
       name: string | null;
@@ -263,16 +378,19 @@ export class AgentService {
       output = `Herramienta desconocida: ${tu.name}`;
     }
 
-    await this.prisma.aiToolCall.create({
-      data: {
-        aiRunId,
-        toolName: tu.name,
-        input: tu.input as Prisma.InputJsonObject,
-        output: { result: output },
-        status: "EXECUTED",
-        resolvedAt: new Date(),
-      },
-    });
+    // En el playground (aiRunId null) no se persiste la llamada a la tool.
+    if (aiRunId) {
+      await this.prisma.aiToolCall.create({
+        data: {
+          aiRunId,
+          toolName: tu.name,
+          input: tu.input as Prisma.InputJsonObject,
+          output: { result: output },
+          status: "EXECUTED",
+          resolvedAt: new Date(),
+        },
+      });
+    }
 
     return { output, escalated, reason };
   }
