@@ -1,9 +1,17 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import * as bcrypt from "bcryptjs";
 import type {
   CreateSourceInput,
+  CreateUserInput,
   SellerDto,
   SourceDto,
   UpdateSourceInput,
+  UpdateUserInput,
 } from "@crm/shared";
 import { PrismaService } from "../../infra/prisma/prisma.service";
 
@@ -49,17 +57,18 @@ export class SourceService {
     return { ok: true };
   }
 
-  // ── Vendedores ───────────────────────────────────────────────
+  // ── Vendedores / equipo ──────────────────────────────────────
+  // Incluye inactivos: el admin necesita verlos para reactivarlos.
   async listSellers(): Promise<{ sellers: SellerDto[]; sources: SourceDto[] }> {
     const [users, sources] = await Promise.all([
       this.prisma.user.findMany({
-        where: { isActive: true },
-        orderBy: { name: "asc" },
+        orderBy: [{ isActive: "desc" }, { name: "asc" }],
         select: {
           id: true,
           name: true,
           email: true,
           role: true,
+          isActive: true,
           sources: { select: { sourceId: true } },
         },
       }),
@@ -71,9 +80,86 @@ export class SourceService {
         name: u.name,
         email: u.email,
         role: u.role,
+        isActive: u.isActive,
         sourceIds: u.sources.map((s) => s.sourceId),
       })),
       sources,
+    };
+  }
+
+  // Crea un usuario del equipo (solo admin).
+  async createUser(input: CreateUserInput): Promise<SellerDto> {
+    const email = input.email.toLowerCase().trim();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) throw new ConflictException("Ese correo ya está registrado");
+
+    const passwordHash = await bcrypt.hash(input.password, 10);
+    const user = await this.prisma.user.create({
+      data: { name: input.name.trim(), email, passwordHash, role: input.role },
+    });
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+      sourceIds: [],
+    };
+  }
+
+  // Edita nombre, rol o estado de un usuario (solo admin). `actingUserId` evita
+  // que un admin se desactive o se quite a sí mismo el rol y se quede fuera.
+  async updateUser(
+    id: string,
+    input: UpdateUserInput,
+    actingUserId: string,
+  ): Promise<SellerDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { sources: { select: { sourceId: true } } },
+    });
+    if (!user) throw new NotFoundException("Usuario no encontrado");
+
+    if (id === actingUserId) {
+      if (input.isActive === false) {
+        throw new BadRequestException("No puedes desactivar tu propia cuenta");
+      }
+      if (input.role && input.role !== "ADMIN") {
+        throw new BadRequestException("No puedes quitarte el rol de administrador");
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.role !== undefined ? { role: input.role } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+      include: { sources: { select: { sourceId: true } } },
+    });
+
+    // Al desactivar, se revocan sus sesiones para echarlo del sistema.
+    if (input.isActive === false) {
+      await this.prisma.$transaction([
+        this.prisma.session.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        }),
+        this.prisma.refreshToken.updateMany({
+          where: { session: { userId: id }, revokedAt: null },
+          data: { revokedAt: new Date() },
+        }),
+      ]);
+    }
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      email: updated.email,
+      role: updated.role,
+      isActive: updated.isActive,
+      sourceIds: updated.sources.map((s) => s.sourceId),
     };
   }
 
@@ -93,6 +179,7 @@ export class SourceService {
       name: user.name,
       email: user.email,
       role: user.role,
+      isActive: user.isActive,
       sourceIds,
     };
   }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmDialog } from "@/lib/confirm";
 import type { CreateTemplateInput, TemplateDto } from "@crm/shared";
 import {
   createTemplate,
@@ -88,7 +89,10 @@ function TemplateRow({
       </div>
       <button
         onClick={() => {
-          if (confirm(`¿Eliminar la plantilla "${template.name}"?`)) onDelete();
+          void confirmDialog({
+            message: `¿Eliminar la plantilla "${template.name}"?`,
+            danger: true,
+          }).then((ok) => ok && onDelete());
         }}
         style={{ ...ghostBtn, color: "#e08a8a", borderColor: "#5a2a2a" }}
       >

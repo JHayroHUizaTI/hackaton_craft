@@ -11,18 +11,24 @@ import {
 import {
   assignSourcesSchema,
   createSourceSchema,
+  createUserSchema,
   setContactSourceSchema,
   updateSourceSchema,
+  updateUserSchema,
   Role,
   type AssignSourcesInput,
   type CreateSourceInput,
+  type CreateUserInput,
   type SetContactSourceInput,
   type UpdateSourceInput,
+  type UpdateUserInput,
+  type AccessTokenClaims,
 } from "@crm/shared";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { SourceService } from "./source.service";
 
 @Controller()
@@ -78,6 +84,27 @@ export class SourcesController {
     @Body(new ZodValidationPipe(assignSourcesSchema)) body: AssignSourcesInput,
   ) {
     return this.sources.assignSources(id, body.sourceIds);
+  }
+
+  // ── Gestión de usuarios del equipo (admin) ─────────────────
+  @Post("users")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  createUser(
+    @Body(new ZodValidationPipe(createUserSchema)) body: CreateUserInput,
+  ) {
+    return this.sources.createUser(body);
+  }
+
+  @Patch("users/:id")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  updateUser(
+    @CurrentUser() user: AccessTokenClaims,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateUserSchema)) body: UpdateUserInput,
+  ) {
+    return this.sources.updateUser(id, body, user.sub);
   }
 
   // ── Fuente de un contacto ──────────────────────────────────

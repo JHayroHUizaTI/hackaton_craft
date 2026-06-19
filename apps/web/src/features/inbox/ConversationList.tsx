@@ -43,6 +43,7 @@ export function ConversationList({
           <li
             key={c.id}
             onClick={() => onSelect(c)}
+            className={`conv-item${active ? " is-active" : ""}`}
             style={{
               display: "flex",
               gap: 12,
@@ -50,17 +51,35 @@ export function ConversationList({
               padding: "12px 16px",
               cursor: "pointer",
               borderBottom: "1px solid var(--border)",
-              background: active ? "#1b2536" : "transparent",
             }}
           >
             <div style={avatar}>{initials(c.contact.name, c.contact.phone)}</div>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <strong style={ellipsis}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <strong
+                  style={{
+                    ...ellipsis,
+                    fontWeight: c.awaitingReply ? 700 : 600,
+                  }}
+                >
                   {c.contact.name ?? c.contact.phone}
                 </strong>
-                <span style={{ color: "var(--muted)", fontSize: 12 }}>
-                  {timeAgo(c.lastMessageAt)}
+                <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  {c.awaitingReply && (
+                    <span
+                      title="Sin responder"
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: "var(--warning)",
+                        boxShadow: "0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent)",
+                      }}
+                    />
+                  )}
+                  <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                    {timeAgo(c.lastMessageAt)}
+                  </span>
                 </span>
               </div>
               <div style={{ color: "var(--muted)", fontSize: 13 }}>

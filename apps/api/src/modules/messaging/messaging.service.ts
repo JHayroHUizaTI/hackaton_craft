@@ -18,6 +18,7 @@ import {
   type ConversationFilter,
   type ConversationStatus,
   type MessageDto,
+  type ReplyFilter,
   type NoteDto,
   type SendMessageInput,
 } from "@crm/shared";
@@ -113,6 +114,7 @@ export class MessagingService {
             windowExpiresAt,
             lastMessageAt: now,
             status: "OPEN",
+            awaitingReply: true, // el contacto escribió: queda pendiente de responder
             // Fija el canal si aún no lo tenía (conversaciones previas).
             ...(channelId && !open.channelId ? { channelId } : {}),
           },
@@ -124,6 +126,7 @@ export class MessagingService {
             status: "OPEN",
             windowExpiresAt,
             lastMessageAt: now,
+            awaitingReply: true,
           },
         });
 
@@ -192,6 +195,7 @@ export class MessagingService {
           where: { id: open.id },
           data: {
             lastMessageAt: now,
+            awaitingReply: false, // contestamos desde el celular
             // Un humano contestó desde el celular → pausar la IA.
             aiPausedUntil: new Date(now.getTime() + this.humanPauseMs),
             ...(channelId && !open.channelId ? { channelId } : {}),
@@ -203,6 +207,7 @@ export class MessagingService {
             channelId,
             status: "OPEN",
             lastMessageAt: now,
+            awaitingReply: false,
             aiPausedUntil: new Date(now.getTime() + this.humanPauseMs),
           },
         });
@@ -440,13 +445,17 @@ export class MessagingService {
 
     await this.outbound.add("send", { messageId: message.id });
 
-    // Si responde un humano, pausar la IA un rato (no pisar al agente humano).
-    if (author === MessageAuthor.HUMAN) {
-      await this.prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { aiPausedUntil: new Date(Date.now() + this.humanPauseMs) },
-      });
-    }
+    // Respondimos: la conversación deja de estar "sin responder". Y si responde
+    // un humano, pausar la IA un rato (no pisar al agente humano).
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        awaitingReply: false,
+        ...(author === MessageAuthor.HUMAN
+          ? { aiPausedUntil: new Date(Date.now() + this.humanPauseMs) }
+          : {}),
+      },
+    });
 
     this.notify(conversation.id);
     return this.toMessageDto(message);
@@ -508,7 +517,11 @@ export class MessagingService {
   // ── Consultas para la bandeja ──────────────────────────────────
   async listConversations(
     userId: string,
-    opts: { filter: ConversationFilter; status?: ConversationStatus },
+    opts: {
+      filter: ConversationFilter;
+      reply?: ReplyFilter;
+      status?: ConversationStatus;
+    },
     role?: string,
   ): Promise<ConversationDto[]> {
     const where: Prisma.ConversationWhereInput = {};
@@ -520,6 +533,10 @@ export class MessagingService {
     // Asignación.
     if (opts.filter === "unassigned") where.assignedAgentId = null;
     else if (opts.filter === "mine") where.assignedAgentId = userId;
+
+    // Estado de respuesta: pendientes (el contacto espera) vs respondidas.
+    if (opts.reply === "pending") where.awaitingReply = true;
+    else if (opts.reply === "replied") where.awaitingReply = false;
 
     // Vendedor (no admin): solo conversaciones de sus fuentes asignadas.
     if (role && role !== "ADMIN") {
@@ -619,6 +636,7 @@ export class MessagingService {
     status: string;
     aiMode: string;
     aiPausedUntil: Date | null;
+    awaitingReply: boolean;
     windowExpiresAt: Date | null;
     lastMessageAt: Date | null;
     contact: {
@@ -667,6 +685,7 @@ export class MessagingService {
         : null,
       aiMode: c.aiMode as AiMode,
       aiPaused: !!c.aiPausedUntil && c.aiPausedUntil > now,
+      awaitingReply: c.awaitingReply,
       windowExpiresAt: c.windowExpiresAt?.toISOString() ?? null,
       windowOpen: !!c.windowExpiresAt && c.windowExpiresAt > now,
       lastMessageAt: c.lastMessageAt?.toISOString() ?? null,

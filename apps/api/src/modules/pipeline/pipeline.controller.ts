@@ -1,11 +1,26 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import {
   createDealSchema,
+  createStageSchema,
   moveDealSchema,
+  reorderStagesSchema,
   updateDealSchema,
+  updateStageSchema,
   type CreateDealInput,
+  type CreateStageInput,
   type MoveDealInput,
+  type ReorderStagesInput,
   type UpdateDealInput,
+  type UpdateStageInput,
 } from "@crm/shared";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
@@ -42,5 +57,38 @@ export class PipelineController {
     @Body(new ZodValidationPipe(updateDealSchema)) body: UpdateDealInput,
   ) {
     return this.pipeline.updateDeal(id, body);
+  }
+
+  @Delete("deals/:id")
+  deleteDeal(@Param("id") id: string) {
+    return this.pipeline.deleteDeal(id);
+  }
+
+  // ── Etapas ─────────────────────────────────────────────────
+  @Post("stages")
+  createStage(
+    @Body(new ZodValidationPipe(createStageSchema)) body: CreateStageInput,
+  ) {
+    return this.pipeline.createStage(body);
+  }
+
+  @Patch("stages/reorder")
+  reorderStages(
+    @Body(new ZodValidationPipe(reorderStagesSchema)) body: ReorderStagesInput,
+  ) {
+    return this.pipeline.reorderStages(body);
+  }
+
+  @Patch("stages/:id")
+  updateStage(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateStageSchema)) body: UpdateStageInput,
+  ) {
+    return this.pipeline.updateStage(id, body);
+  }
+
+  @Delete("stages/:id")
+  deleteStage(@Param("id") id: string) {
+    return this.pipeline.deleteStage(id);
   }
 }

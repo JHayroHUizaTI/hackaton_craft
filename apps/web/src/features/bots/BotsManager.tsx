@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmDialog } from "@/lib/confirm";
 import type { BotDto } from "@crm/shared";
 import { deleteBot, fetchBots } from "@/lib/bff";
 import { BotEditor } from "./BotEditor";
@@ -97,9 +98,10 @@ export function BotsManager() {
               onSaved={() => queryClient.invalidateQueries({ queryKey: ["bots"] })}
               onCancel={() => setSel({ kind: "none" })}
               onDeleted={() => {
-                if (confirm(`¿Eliminar el bot "${selectedBot.name}"?`)) {
-                  remove.mutate(selectedBot.id);
-                }
+                void confirmDialog({
+                  message: `¿Eliminar el bot "${selectedBot.name}"?`,
+                  danger: true,
+                }).then((ok) => ok && remove.mutate(selectedBot.id));
               }}
             />
           </>

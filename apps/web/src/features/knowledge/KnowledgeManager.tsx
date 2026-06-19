@@ -174,6 +174,7 @@ const card: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   padding: 18,
+  boxShadow: "var(--shadow-card)",
 };
 
 const input: React.CSSProperties = {

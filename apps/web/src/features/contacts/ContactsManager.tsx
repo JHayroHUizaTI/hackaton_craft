@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmDialog } from "@/lib/confirm";
 import {
   customFieldTypes,
   type ContactListItem,
@@ -167,7 +168,10 @@ function CustomFieldsPanel({ fields }: { fields: CustomFieldDto[] }) {
             {f.label} <span style={{ opacity: 0.6 }}>· {f.type}</span>
             <button
               onClick={() => {
-                if (confirm(`¿Eliminar el campo "${f.label}"?`)) remove.mutate(f.id);
+                void confirmDialog({
+                  message: `¿Eliminar el campo "${f.label}"?`,
+                  danger: true,
+                }).then((ok) => ok && remove.mutate(f.id));
               }}
               style={chipX}
             >
@@ -440,6 +444,7 @@ const table: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   overflow: "hidden",
+  boxShadow: "var(--shadow-card)",
 };
 
 const tr: React.CSSProperties = { borderBottom: "1px solid var(--border)" };

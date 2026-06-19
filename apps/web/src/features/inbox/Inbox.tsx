@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ConversationStatus,
   type ConversationFilter,
+  type ReplyFilter,
 } from "@crm/shared";
 import { fetchConversations } from "@/lib/bff";
 import { useInboxSocket } from "@/hooks/useInboxSocket";
@@ -17,17 +18,24 @@ const FILTERS: { key: ConversationFilter; label: string }[] = [
   { key: "mine", label: "Mías" },
 ];
 
+const REPLY_FILTERS: { key: ReplyFilter; label: string; dot?: string }[] = [
+  { key: "all", label: "Todas" },
+  { key: "pending", label: "Sin responder", dot: "var(--warning)" },
+  { key: "replied", label: "Respondidas", dot: "var(--accent)" },
+];
+
 type StatusFilter = ConversationStatus | "";
 
 export function Inbox() {
   const { connected } = useInboxSocket();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ConversationFilter>("all");
+  const [reply, setReply] = useState<ReplyFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("");
 
   const { data: conversations = [], isLoading } = useQuery({
-    queryKey: ["conversations", filter, status],
-    queryFn: () => fetchConversations(filter, status || undefined),
+    queryKey: ["conversations", filter, reply, status],
+    queryFn: () => fetchConversations(filter, status || undefined, reply),
   });
 
   const selected = useMemo(() => {
@@ -59,6 +67,30 @@ export function Inbox() {
                 onClick={() => setFilter(f.key)}
                 style={chip(filter === f.key)}
               >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {REPLY_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setReply(f.key)}
+                style={chip(reply === f.key)}
+              >
+                {f.dot && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: f.dot,
+                      marginRight: 5,
+                      verticalAlign: "middle",
+                    }}
+                  />
+                )}
                 {f.label}
               </button>
             ))}

@@ -1,6 +1,8 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -25,10 +27,29 @@ interface DeviceMeta {
   ipAddress?: string;
 }
 
+interface AttemptRecord {
+  count: number;
+  firstAt: number;
+}
+
 @Injectable()
 export class AuthService {
   private readonly accessTtl = process.env.JWT_ACCESS_TTL ?? "15m";
   private readonly refreshTtlDays = Number(process.env.REFRESH_TTL_DAYS ?? 30);
+  // Ventana de tolerancia para refresh concurrentes. Si un token se rotó hace
+  // pocos segundos y la sesión sigue viva, asumimos una carrera benigna (varias
+  // pestañas / requests en paralelo al expirar el access token) en vez de robo.
+  private readonly refreshGraceMs = Number(
+    process.env.REFRESH_GRACE_MS ?? 30_000,
+  );
+  // Rate-limit de login en memoria: frena fuerza bruta por IP+email.
+  private readonly loginMaxAttempts = Number(
+    process.env.LOGIN_MAX_ATTEMPTS ?? 8,
+  );
+  private readonly loginWindowMs = Number(
+    process.env.LOGIN_WINDOW_MS ?? 15 * 60 * 1000,
+  );
+  private readonly loginAttempts = new Map<string, AttemptRecord>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -61,14 +82,22 @@ export class AuthService {
 
   // ── Login ──────────────────────────────────────────────────
   async login(input: LoginInput, meta: DeviceMeta): Promise<AuthTokens> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: input.email.toLowerCase().trim() },
-    });
+    const email = input.email.toLowerCase().trim();
+    const throttleKey = `${meta.ipAddress ?? "?"}:${email}`;
+    this.assertNotThrottled(throttleKey);
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || !user.isActive) {
+      this.recordFailedLogin(throttleKey);
       throw new UnauthorizedException("Credenciales inválidas");
     }
     const ok = await bcrypt.compare(input.password, user.passwordHash);
-    if (!ok) throw new UnauthorizedException("Credenciales inválidas");
+    if (!ok) {
+      this.recordFailedLogin(throttleKey);
+      throw new UnauthorizedException("Credenciales inválidas");
+    }
+    // Login correcto → se limpia el contador de intentos.
+    this.loginAttempts.delete(throttleKey);
 
     const session = await this.prisma.session.create({
       data: {
@@ -95,17 +124,43 @@ export class AuthService {
     if (!stored) throw new UnauthorizedException("Refresh token inválido");
 
     const { session } = stored;
+    const now = new Date();
 
-    // REUSO DETECTADO: token ya rotado o revocado → robo probable.
-    // Se revoca toda la familia (la sesión completa).
+    // REUSO DETECTADO: token ya rotado o revocado.
     if (stored.rotatedAt || stored.revokedAt || session.revokedAt) {
+      // Carrera benigna: el token se rotó hace segundos, no fue revocado y la
+      // sesión sigue viva. Es el caso típico de varias pestañas (o requests en
+      // paralelo) refrescando a la vez al expirar el access token. Antes esto
+      // revocaba TODA la sesión → "logout fantasma". Ahora emitimos tokens
+      // nuevos sobre la misma sesión en vez de revocar.
+      const benignRace =
+        stored.rotatedAt &&
+        !stored.revokedAt &&
+        !session.revokedAt &&
+        now.getTime() - stored.rotatedAt.getTime() < this.refreshGraceMs;
+
+      if (
+        benignRace &&
+        session.expiresAt > now &&
+        session.user.isActive
+      ) {
+        const next = await this.createRefreshToken(session.id);
+        await this.prisma.session.update({
+          where: { id: session.id },
+          data: { lastUsedAt: now },
+        });
+        return this.issueTokens(session.user, session.id, next.raw);
+      }
+
+      // Reuso real (token viejo fuera de la ventana, o ya revocado) → robo
+      // probable: se revoca toda la familia (la sesión completa).
       await this.revokeSession(session.id);
       throw new ForbiddenException(
         "Refresh token reutilizado. Sesión revocada por seguridad.",
       );
     }
 
-    if (stored.expiresAt < new Date() || session.expiresAt < new Date()) {
+    if (stored.expiresAt < now || session.expiresAt < now) {
       throw new UnauthorizedException("Sesión expirada");
     }
 
@@ -133,6 +188,70 @@ export class AuthService {
       where: { tokenHash: this.hash(rawToken) },
     });
     if (stored) await this.revokeSession(stored.sessionId);
+  }
+
+  // ── Cuenta / perfil ────────────────────────────────────────
+  async getMe(userId: string): Promise<PublicUser> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException("Usuario no encontrado");
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as Role,
+    };
+  }
+
+  async updateProfile(userId: string, name: string): Promise<PublicUser> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { name: name.trim() },
+    });
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as Role,
+    };
+  }
+
+  // Cambia la contraseña verificando la actual. Por seguridad, revoca todas
+  // las demás sesiones (deja viva solo la actual): si alguien tenía la cuenta
+  // abierta con la contraseña vieja, queda fuera.
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    keepSessionId?: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException("Usuario no encontrado");
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedException("La contraseña actual no es correcta");
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+    await this.revokeOtherSessions(userId, keepSessionId);
+  }
+
+  // Revoca todas las sesiones del usuario salvo la indicada (la actual).
+  async revokeOtherSessions(
+    userId: string,
+    keepSessionId?: string,
+  ): Promise<void> {
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        ...(keepSessionId ? { id: { not: keepSessionId } } : {}),
+      },
+      select: { id: true },
+    });
+    await Promise.all(sessions.map((s) => this.revokeSession(s.id)));
   }
 
   // ── Listar sesiones activas del usuario ────────────────────
@@ -232,6 +351,33 @@ export class AuthService {
 
   private hash(token: string): string {
     return createHash("sha256").update(token).digest("hex");
+  }
+
+  // ── Rate-limit de login (anti fuerza bruta) ────────────────
+  private assertNotThrottled(key: string): void {
+    const rec = this.loginAttempts.get(key);
+    if (!rec) return;
+    // Ventana expirada → se reinicia el contador.
+    if (Date.now() - rec.firstAt > this.loginWindowMs) {
+      this.loginAttempts.delete(key);
+      return;
+    }
+    if (rec.count >= this.loginMaxAttempts) {
+      throw new HttpException(
+        "Demasiados intentos de inicio de sesión. Espera unos minutos.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private recordFailedLogin(key: string): void {
+    const now = Date.now();
+    const rec = this.loginAttempts.get(key);
+    if (!rec || now - rec.firstAt > this.loginWindowMs) {
+      this.loginAttempts.set(key, { count: 1, firstAt: now });
+    } else {
+      rec.count += 1;
+    }
   }
 
   private refreshExpiry(): Date {

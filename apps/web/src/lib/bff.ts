@@ -13,8 +13,13 @@ import type {
   ContactDto,
   ConversationDto,
   ConversationFilter,
+  ReplyFilter,
   ConversationStatus,
   CreateDealInput,
+  UpdateDealInput,
+  CreateStageInput,
+  UpdateStageInput,
+  StageDto,
   DealDto,
   MessageDto,
   NoteDto,
@@ -42,6 +47,15 @@ import type {
   CreateSourceInput,
   UpdateSourceInput,
   SellersResponse,
+  SellerDto,
+  CreateUserInput,
+  UpdateUserInput,
+  TagDto,
+  CreateTagInput,
+  UpdateTagInput,
+  PublicUser,
+  UpdateProfileInput,
+  ChangePasswordInput,
   ProductDto,
   CreateProductInput,
   UpdateProductInput,
@@ -55,11 +69,27 @@ import type {
 
 // Fetchers del lado del cliente: llaman al BFF (mismo origen, cookie httpOnly).
 
+// Extrae el mensaje de error del backend (NestJS responde { message }) para
+// mostrar algo útil en vez de un genérico. Cae al fallback si no hay cuerpo.
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    const msg = (data as { message?: string | string[] }).message;
+    if (Array.isArray(msg)) return msg.join(", ");
+    if (typeof msg === "string" && msg) return msg;
+  } catch {
+    /* sin cuerpo JSON */
+  }
+  return fallback;
+}
+
 export async function fetchConversations(
   filter: ConversationFilter = "all",
   status?: ConversationStatus,
+  reply: ReplyFilter = "all",
 ): Promise<ConversationDto[]> {
   const sp = new URLSearchParams({ filter });
+  if (reply !== "all") sp.set("reply", reply);
   if (status) sp.set("status", status);
   const res = await fetch(`/api/bff/conversations?${sp.toString()}`);
   if (!res.ok) throw new Error("No se pudieron cargar las conversaciones");
@@ -549,6 +579,101 @@ export async function assignSellerSources(
   if (!res.ok) throw new Error("No se pudo asignar");
 }
 
+// ── Etiquetas ────────────────────────────────────────────────
+export async function fetchTags(): Promise<TagDto[]> {
+  const res = await fetch("/api/bff/tags");
+  if (!res.ok) throw new Error("No se pudieron cargar las etiquetas");
+  return res.json();
+}
+
+export async function createTag(input: CreateTagInput): Promise<TagDto> {
+  const res = await fetch("/api/bff/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, "No se pudo crear la etiqueta"));
+  return res.json();
+}
+
+export async function updateTag(
+  id: string,
+  input: UpdateTagInput,
+): Promise<TagDto> {
+  const res = await fetch(`/api/bff/tags/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, "No se pudo guardar la etiqueta"));
+  return res.json();
+}
+
+export async function deleteTag(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/tags/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo eliminar la etiqueta");
+}
+
+// ── Gestión de usuarios del equipo (admin) ───────────────────
+export async function createUser(input: CreateUserInput): Promise<SellerDto> {
+  const res = await fetch("/api/bff/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, "No se pudo crear el usuario"));
+  return res.json();
+}
+
+export async function updateUser(
+  id: string,
+  input: UpdateUserInput,
+): Promise<SellerDto> {
+  const res = await fetch(`/api/bff/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, "No se pudo actualizar el usuario"));
+  return res.json();
+}
+
+// ── Perfil / cuenta ──────────────────────────────────────────
+export async function fetchMe(): Promise<PublicUser> {
+  const res = await fetch("/api/bff/auth/me");
+  if (!res.ok) throw new Error("No se pudo cargar tu perfil");
+  return res.json();
+}
+
+export async function updateProfile(
+  input: UpdateProfileInput,
+): Promise<PublicUser> {
+  const res = await fetch("/api/bff/auth/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, "No se pudo guardar el perfil"));
+  return res.json();
+}
+
+export async function changePassword(
+  input: ChangePasswordInput,
+): Promise<void> {
+  const res = await fetch("/api/bff/auth/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok)
+    throw new Error(await errorMessage(res, "No se pudo cambiar la contraseña"));
+}
+
+export async function revokeOtherSessions(): Promise<void> {
+  const res = await fetch("/api/bff/auth/sessions", { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudieron cerrar las otras sesiones");
+}
+
 export async function setContactSource(
   contactId: string,
   sourceId: string | null,
@@ -704,6 +829,65 @@ export async function moveDeal(
   });
   if (!res.ok) throw new Error("No se pudo mover el deal");
   return res.json();
+}
+
+export async function updateDeal(
+  dealId: string,
+  input: UpdateDealInput,
+): Promise<DealDto> {
+  const res = await fetch(`/api/bff/deals/${dealId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar el deal");
+  return res.json();
+}
+
+export async function deleteDeal(dealId: string): Promise<void> {
+  const res = await fetch(`/api/bff/deals/${dealId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("No se pudo eliminar el deal");
+}
+
+// ── Etapas del pipeline ──────────────────────────────────────
+export async function createStage(input: CreateStageInput): Promise<StageDto> {
+  const res = await fetch("/api/bff/stages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo crear la etapa");
+  return res.json();
+}
+
+export async function updateStage(
+  id: string,
+  input: UpdateStageInput,
+): Promise<StageDto> {
+  const res = await fetch(`/api/bff/stages/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar la etapa");
+  return res.json();
+}
+
+export async function deleteStage(id: string): Promise<void> {
+  const res = await fetch(`/api/bff/stages/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(b?.message ?? "No se pudo eliminar la etapa");
+  }
+}
+
+export async function reorderStages(ids: string[]): Promise<void> {
+  const res = await fetch("/api/bff/stages/reorder", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error("No se pudo reordenar");
 }
 
 export async function fetchContacts(search = ""): Promise<ContactDto[]> {

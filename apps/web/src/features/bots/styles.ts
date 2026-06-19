@@ -5,6 +5,7 @@ export const box: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   padding: 18,
+  boxShadow: "var(--shadow-card)",
   display: "flex",
   flexDirection: "column",
   gap: 12,

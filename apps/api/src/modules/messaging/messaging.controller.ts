@@ -39,9 +39,10 @@ export class MessagingController {
   listConversations(
     @CurrentUser() user: AccessTokenClaims,
     @Query("filter") filter?: string,
+    @Query("reply") reply?: string,
     @Query("status") status?: string,
   ) {
-    const q = conversationsQuerySchema.parse({ filter, status });
+    const q = conversationsQuerySchema.parse({ filter, reply, status });
     return this.messaging.listConversations(user.sub, q, user.role);
   }
 

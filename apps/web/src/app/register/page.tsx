@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthError } from "next-auth";
 import { auth, signIn } from "@/auth";
+import { PasswordField } from "@/components/PasswordField";
 
 const API_URL = process.env.API_URL ?? "http://localhost:3001";
 
@@ -65,14 +66,7 @@ export default async function RegisterPage({
         <input name="email" type="email" required placeholder="tucorreo@empresa.com" style={input} />
 
         <label style={label}>Contraseña</label>
-        <input
-          name="password"
-          type="password"
-          required
-          minLength={8}
-          placeholder="Mínimo 8 caracteres"
-          style={input}
-        />
+        <PasswordField />
 
         <button type="submit" style={btn}>
           Crear cuenta

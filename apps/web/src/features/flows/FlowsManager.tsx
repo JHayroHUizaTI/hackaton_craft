@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmDialog } from "@/lib/confirm";
 import type { FlowSummary } from "@crm/shared";
 import { deleteFlow, fetchFlows, fetchPipeline } from "@/lib/bff";
 import { FlowBuilder } from "./FlowBuilder";
@@ -67,7 +68,10 @@ export function FlowsManager() {
             flow={f}
             onEdit={() => setView({ kind: "edit", id: f.id })}
             onDelete={() => {
-              if (confirm(`¿Eliminar el flujo "${f.name}"?`)) remove.mutate(f.id);
+              void confirmDialog({
+                message: `¿Eliminar el flujo "${f.name}"?`,
+                danger: true,
+              }).then((ok) => ok && remove.mutate(f.id));
             }}
           />
         ))}
@@ -141,6 +145,7 @@ const row: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 10,
   background: "var(--panel)",
+  boxShadow: "var(--shadow-card)",
 };
 
 const empty: React.CSSProperties = {

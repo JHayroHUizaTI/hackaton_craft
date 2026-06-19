@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-18T00:00:00Z",
+  "title": "Design System: CRM Prime",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Verde Señal",
+        "canonical": "#25d366",
+        "tonalRamp": ["#07140c", "#0c2916", "#114d27", "#167a3c", "#1ba84f", "#25d366", "#5fe08c", "#9eeeb7"]
+      },
+      "positive": {
+        "role": "secondary",
+        "displayName": "Verde Vital",
+        "canonical": "#7ee2a8",
+        "tonalRamp": ["#0f2a1c", "#16442d", "#1d6242", "#2a8559", "#4fae74", "#7ee2a8", "#a6edc4", "#cdf6df"]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Fondo Sala",
+        "canonical": "#0b0f17",
+        "tonalRamp": ["#0b0f17", "#0d121d", "#0f1726", "#131a26", "#1c2738", "#223049", "#5a6b85", "#8aa0bd"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Superficie",
+        "canonical": "#131a26",
+        "tonalRamp": ["#0b0f17", "#0d121d", "#0f1726", "#131a26", "#1c2738", "#223049", "#3a4a66", "#5a6b85"]
+      },
+      "border": { "role": "neutral", "displayName": "Borde", "canonical": "#223049" },
+      "ink": { "role": "neutral", "displayName": "Tinta", "canonical": "#e6edf6" },
+      "muted": { "role": "neutral", "displayName": "Tinta Apagada", "canonical": "#8aa0bd" },
+      "warning": { "role": "tertiary", "displayName": "Ámbar", "canonical": "#e0a458" },
+      "danger": { "role": "tertiary", "displayName": "Rojo Suave", "canonical": "#e08a8a" }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Título de página en la cabecera del AppShell." },
+      "title": { "displayName": "Title", "purpose": "Títulos de sección, tarjeta y panel/drawer." },
+      "body": { "displayName": "Body", "purpose": "Texto general, mensajes, filas de tabla. 65–75ch en prosa." },
+      "label": { "displayName": "Label", "purpose": "Etiquetas de formulario y metadatos." },
+      "overline": { "displayName": "Overline", "purpose": "Solo rótulos de grupo del nav lateral." }
+    },
+    "shadows": [
+      { "name": "card-lift", "value": "0 1px 2px rgba(0,0,0,.35), 0 6px 14px rgba(0,0,0,.22)", "purpose": "Tarjetas y paneles en reposo: levanta sin gritar." },
+      { "name": "overlay", "value": "0 6px 20px rgba(0,0,0,.45)", "purpose": "Menús, dropdowns, popovers." },
+      { "name": "drawer", "value": "-8px 0 24px rgba(0,0,0,.4)", "purpose": "Paneles laterales (detalle de deal, config de bot, sesiones)." }
+    ],
+    "motion": [
+      { "name": "ease-control", "value": "ease", "purpose": "Hover/active de botones y controles (0.13s)." },
+      { "name": "fade-in", "value": "fadeIn 0.2s ease both", "purpose": "Entrada suave del contenido al navegar entre secciones." },
+      { "name": "duration-fast", "value": "120ms", "purpose": "Transiciones de estado (foco, hover, color)." }
+    ],
+    "breakpoints": [
+      { "name": "sidebar-collapse", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Acción principal de cada vista. Verde Señal con texto casi negro.",
+      "html": "<button class=\"ds-btn-primary\">Guardar</button>",
+      "css": ".ds-btn-primary { background: var(--accent, #25d366); color: #04210f; font-weight: 600; font-size: 14px; padding: 9px 16px; border: none; border-radius: 8px; cursor: pointer; transition: filter .13s ease, transform .07s ease; } .ds-btn-primary:hover { filter: brightness(1.08); } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #25d366); outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Acción secundaria (Cancelar, Editar). Transparente con borde hairline.",
+      "html": "<button class=\"ds-btn-ghost\">Cancelar</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: var(--muted, #8aa0bd); font-size: 13px; padding: 8px 14px; border: 1px solid var(--border, #223049); border-radius: 8px; cursor: pointer; transition: filter .13s ease, color .13s ease, transform .07s ease; } .ds-btn-ghost:hover { filter: brightness(1.12); color: var(--text, #e6edf6); } .ds-btn-ghost:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Field Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Campo de texto. Interior más hondo que la superficie; foco con anillo de acento por outline.",
+      "html": "<input class=\"ds-input\" placeholder=\"Buscar por nombre o teléfono…\" />",
+      "css": ".ds-input { background: #0d1320; color: var(--text, #e6edf6); font-size: 14px; padding: 9px 11px; border: 1px solid var(--border, #223049); border-radius: 8px; caret-color: var(--accent, #25d366); transition: outline-color .12s ease, border-color .12s ease; } .ds-input::placeholder { color: #5d6e88; } .ds-input:focus-visible { outline: 2px solid var(--accent, #25d366); outline-offset: 2px; }"
+    },
+    {
+      "name": "Nav Item (active)",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Ítem de la barra lateral con icono de línea. Activo = fondo acento tenue + barra de acento a la izquierda.",
+      "html": "<a class=\"ds-nav-item is-active\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M22 12h-6l-2 3h-4l-2-3H2\"/><path d=\"M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z\"/></svg>Bandeja</a>",
+      "css": ".ds-nav-item { position: relative; display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 8px; color: var(--muted, #8aa0bd); text-decoration: none; font-size: 14px; font-weight: 500; transition: background .12s ease, color .12s ease; } .ds-nav-item svg { width: 18px; height: 18px; } .ds-nav-item:hover { background: #16202f; color: var(--text, #e6edf6); } .ds-nav-item.is-active { background: rgba(37,211,102,.12); color: #eafff3; } .ds-nav-item.is-active::before { content: \"\"; position: absolute; left: -10px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent, #25d366); }"
+    },
+    {
+      "name": "Surface Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Tarjeta/panel levantado del fondo con sombra suave; borde hairline opcional.",
+      "html": "<div class=\"ds-card\"><strong>Oportunidad: Ana</strong><div class=\"ds-card-sub\">+51 999 ···</div><div class=\"ds-card-val\">$ 1,200</div></div>",
+      "css": ".ds-card { background: var(--panel, #131a26); color: var(--text, #e6edf6); border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 14px rgba(0,0,0,.22); } .ds-card-sub { color: var(--muted, #8aa0bd); font-size: 12px; margin-top: 4px; } .ds-card-val { color: var(--accent, #25d366); font-size: 13px; margin-top: 6px; font-weight: 600; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Pastilla de estado/etiqueta. Estado positivo en Verde Señal tenue + Verde Vital.",
+      "html": "<span class=\"ds-chip\">en línea</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(37,211,102,.12); color: #7ee2a8; font-size: 11px; padding: 2px 9px; border-radius: 999px; }"
+    },
+    {
+      "name": "Message Bubble (signature)",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Burbuja de la bandeja. Saliente verde profundo a la derecha; estado de envío en Verde Vital.",
+      "html": "<div class=\"ds-bubble ds-bubble-out\"><div>¡Listo! Te envío la cotización.</div><div class=\"ds-bubble-meta\">IA · leído</div></div>",
+      "css": ".ds-bubble { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 14px; color: var(--text, #e6edf6); } .ds-bubble-out { margin-left: auto; background: #155e3b; } .ds-bubble-meta { font-size: 11px; color: #9fd9b6; text-align: right; margin-top: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "La Sala de Control",
+    "overview": "CRM Prime es el puesto de mando del vendedor: una superficie oscura y enfocada donde toda la operación —conversaciones en vivo, oportunidades, campañas— está a la vista y bajo control. El fondo casi negro azulado es la sala con las luces bajas para que lo que importa brille. Y lo que brilla es el Verde Señal: el pulso del producto, reservado para la acción y el estado vivo. El sistema es denso pero legible; la energía se expresa con microinteracciones táctiles y la presencia rítmica del verde, no con saturación.",
+    "keyCharacteristics": [
+      "Sala oscura azulada; el contenido es la luz.",
+      "Un solo acento con significado: Verde Señal = acción y vida.",
+      "Densidad con jerarquía; aire que respira, nunca apretado.",
+      "Energía por movimiento táctil, no por color saturado.",
+      "Estados siempre explícitos (color + icono/texto), nunca solo color."
+    ],
+    "rules": [
+      { "name": "La Regla de la Única Señal", "body": "El Verde Señal aparece en ≤10% de cualquier pantalla. Es para acción y vida, jamás para rellenar.", "section": "colors" },
+      { "name": "La Regla del Estado Doble", "body": "Ningún estado se comunica solo con color: siempre color + icono o palabra.", "section": "colors" },
+      { "name": "La Regla del Peso Antes que la Fuente", "body": "La jerarquía se hace con tamaño y peso en una sola familia sans del sistema.", "section": "typography" },
+      { "name": "La Regla del Overline Confinado", "body": "Las mayúsculas tracked viven solo en los rótulos de grupo del nav, nunca como eyebrow sobre contenido.", "section": "typography" },
+      { "name": "La Regla Anti Ghost-Card", "body": "Si una tarjeta se eleva con sombra, su borde baja a hairline o desaparece. Nunca border 1px + sombra de blur ≥16px.", "section": "elevation" },
+      { "name": "La Regla de la Sombra Jerárquica", "body": "La fuerza de la sombra crece con la altura: tarjeta < overlay < drawer < modal.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do reservar el Verde Señal (#25d366) para acción y estado vivo; ≤10% de la pantalla.",
+      "Do comunicar todo estado con color + icono o palabra (entregado, ganado, perdido, IA pausada).",
+      "Do elevar tarjetas con sombra suave (blur ≤14px) y bajar el borde a hairline cuando la sombra ya separa.",
+      "Do dar respuesta táctil: hover que sube brillo, :active que hunde 1px, anillo de foco de acento por outline.",
+      "Do mantener una sola familia sans del sistema; jerarquía por tamaño y peso.",
+      "Do texto de cuerpo a ≥4.5:1; placeholders legibles (#5d6e88)."
+    ],
+    "donts": [
+      "Don't caer en SaaS genérico de plantilla: rejillas de tarjetas idénticas, todo gris, el template big-number + label.",
+      "Don't volverlo colorido/infantil: arcoíris de colores ni emojis por todos lados.",
+      "Don't parecer corporativo frío/anticuado: azules rígidos ni tablas densas estilo software de los 2000.",
+      "Don't parear border 1px solid con box-shadow de blur ≥16px en la misma tarjeta o botón (ghost-card).",
+      "Don't redondear tarjetas/inputs a 24/28/32px+; el techo es 12px (full-pill solo en chips).",
+      "Don't usar el verde como relleno decorativo, gradientes de texto, ni glassmorphism por defecto."
+    ]
+  }
+}

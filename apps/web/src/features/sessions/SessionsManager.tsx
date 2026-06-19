@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SessionDto } from "@crm/shared";
-import { fetchSessions, revokeSession } from "@/lib/bff";
+import { fetchSessions, revokeOtherSessions, revokeSession } from "@/lib/bff";
+import { confirmDialog } from "@/lib/confirm";
+import { toast } from "@/lib/toast";
 
 const PLATFORM_LABEL: Record<string, string> = {
   WEB: "Navegador web",
@@ -23,12 +25,39 @@ export function SessionsManager() {
       queryClient.invalidateQueries({ queryKey: ["sessions-list"] }),
   });
 
+  const revokeOthers = useMutation({
+    mutationFn: revokeOtherSessions,
+    onSuccess: () => {
+      toast.success("Se cerraron las demás sesiones");
+      queryClient.invalidateQueries({ queryKey: ["sessions-list"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const otherCount = (sessions ?? []).filter((s) => !s.current).length;
+
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
-      <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Dispositivos y navegadores donde tu cuenta está abierta. Si no reconoces
-        uno, ciérralo: su sesión se revoca al instante.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+        <p style={{ color: "var(--muted)", marginTop: 0 }}>
+          Dispositivos y navegadores donde tu cuenta está abierta. Si no
+          reconoces uno, ciérralo: su sesión se revoca al instante.
+        </p>
+        {otherCount > 0 && (
+          <button
+            onClick={() => {
+              void confirmDialog({
+                message: `¿Cerrar las otras ${otherCount} sesion${otherCount > 1 ? "es" : ""}? Tendrás que volver a iniciar sesión en esos dispositivos.`,
+                danger: true,
+              }).then((ok) => ok && revokeOthers.mutate());
+            }}
+            disabled={revokeOthers.isPending}
+            style={revokeAllBtn}
+          >
+            {revokeOthers.isPending ? "Cerrando…" : "Cerrar las demás"}
+          </button>
+        )}
+      </div>
 
       {isPending && <p style={{ color: "var(--muted)" }}>Cargando…</p>}
       {isError && <p style={{ color: "#ff6b6b" }}>{(error as Error).message}</p>}
@@ -89,6 +118,7 @@ const row: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 10,
   background: "var(--panel)",
+  boxShadow: "var(--shadow-card)",
 };
 
 const badge: React.CSSProperties = {
@@ -108,6 +138,18 @@ const ghostBtn: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 13,
   whiteSpace: "nowrap",
+};
+
+const revokeAllBtn: React.CSSProperties = {
+  padding: "8px 14px",
+  borderRadius: 8,
+  border: "1px solid #5a2a2a",
+  background: "transparent",
+  color: "#e08a8a",
+  cursor: "pointer",
+  fontSize: 13,
+  whiteSpace: "nowrap",
+  flexShrink: 0,
 };
 
 function dot(color: string): React.CSSProperties {

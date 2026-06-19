@@ -14,7 +14,9 @@ export type NavKey =
   | "sellers"
   | "knowledge"
   | "whatsapp"
-  | "sessions";
+  | "sessions"
+  | "account"
+  | "settings";
 
 type Item = {
   key: NavKey;
@@ -62,6 +64,18 @@ const NAV: Group[] = [
       { key: "whatsapp", href: "/whatsapp", label: "WhatsApp", icon: "whatsapp" },
     ],
   },
+  {
+    label: "Sistema",
+    items: [
+      {
+        key: "settings",
+        href: "/settings",
+        label: "Ajustes",
+        icon: "settings",
+        adminOnly: true,
+      },
+    ],
+  },
 ];
 
 const TITLES: Record<NavKey, { title: string; subtitle: string }> = {
@@ -76,6 +90,8 @@ const TITLES: Record<NavKey, { title: string; subtitle: string }> = {
   knowledge: { title: "Conocimiento", subtitle: "Base de conocimiento para la IA" },
   whatsapp: { title: "WhatsApp", subtitle: "Conecta y gestiona tus números" },
   sessions: { title: "Sesiones", subtitle: "Dispositivos con tu cuenta abierta" },
+  account: { title: "Mi cuenta", subtitle: "Perfil, contraseña y seguridad" },
+  settings: { title: "Ajustes", subtitle: "Etiquetas, canales, fuentes y más" },
 };
 
 export function AppShell({
@@ -135,9 +151,10 @@ export function AppShell({
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <AgentConfigDrawer />
             <Link
-              href="/sessions"
-              style={{ ...userChip, textDecoration: "none", color: "var(--text)" }}
-              title="Sesiones y dispositivos"
+              href="/account"
+              className="user-chip"
+              style={{ ...userChip, color: "var(--text)" }}
+              title="Mi cuenta"
             >
               <span style={avatar}>{(email[0] ?? "?").toUpperCase()}</span>
               <div style={{ lineHeight: 1.2 }}>
@@ -158,7 +175,7 @@ export function AppShell({
           </div>
         </header>
 
-        <div style={content}>{children}</div>
+        <div className="app-content" style={content}>{children}</div>
       </div>
     </div>
   );
@@ -217,6 +234,9 @@ const topbar: React.CSSProperties = {
   padding: "0 20px",
   borderBottom: "1px solid var(--border)",
   background: "var(--bg)",
+  // La cabecera flota una pizca sobre el contenido que hace scroll bajo ella.
+  boxShadow: "0 4px 16px rgba(0,0,0,0.22)",
+  zIndex: 1,
 };
 
 const content: React.CSSProperties = {
@@ -229,6 +249,9 @@ const userChip: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 9,
+  padding: "4px 6px",
+  borderRadius: 9,
+  transition: "background 0.12s ease",
 };
 
 const avatar: React.CSSProperties = {

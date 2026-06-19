@@ -2,13 +2,18 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SellerDto, SourceDto } from "@crm/shared";
+import { confirmDialog } from "@/lib/confirm";
+import { toast } from "@/lib/toast";
+import type { Role, SellerDto, SourceDto } from "@crm/shared";
 import {
   assignSellerSources,
   createSource,
+  createUser,
   deleteSource,
   fetchSellers,
+  updateUser,
 } from "@/lib/bff";
+import { PasswordStrength, scorePassword } from "@/components/PasswordStrength";
 
 export function SellersManager() {
   const queryClient = useQueryClient();
@@ -26,6 +31,17 @@ export function SellersManager() {
       {isPending && <p style={muted}>Cargando…</p>}
       {isError && <p style={{ color: "#ff6b6b" }}>{(error as Error).message}</p>}
 
+      {/* Crear usuario */}
+      <section>
+        <h3 style={{ margin: "0 0 4px" }}>Equipo</h3>
+        <p style={{ ...muted, marginTop: 0 }}>
+          Crea las cuentas de tu equipo. Los <strong>vendedores</strong> solo ven
+          las conversaciones de sus fuentes; los <strong>administradores</strong>
+          {" "}ven todo y gestionan la configuración.
+        </p>
+        <CreateUserForm onCreated={refresh} />
+      </section>
+
       {/* Fuentes */}
       <section>
         <h3 style={{ margin: "0 0 4px" }}>Fuentes</h3>
@@ -38,7 +54,7 @@ export function SellersManager() {
 
       {/* Vendedores */}
       <section>
-        <h3 style={{ margin: "0 0 4px" }}>Vendedores y sus fuentes</h3>
+        <h3 style={{ margin: "0 0 4px" }}>Usuarios y sus fuentes</h3>
         <p style={{ ...muted, marginTop: 0 }}>
           Cada vendedor verá en su bandeja <strong>solo</strong> las
           conversaciones de los contactos de las fuentes que marques. Los
@@ -50,6 +66,103 @@ export function SellersManager() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function CreateUserForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Role>("AGENT" as Role);
+
+  const reset = () => {
+    setName("");
+    setEmail("");
+    setPassword("");
+    setRole("AGENT" as Role);
+  };
+
+  const create = useMutation({
+    mutationFn: () =>
+      createUser({ name: name.trim(), email: email.trim(), password, role }),
+    onSuccess: () => {
+      toast.success("Usuario creado");
+      reset();
+      setOpen(false);
+      onCreated();
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const canSubmit =
+    name.trim().length > 0 &&
+    /.+@.+\..+/.test(email) &&
+    password.length >= 8 &&
+    scorePassword(password) >= 2;
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={primaryBtn}>
+        + Nuevo usuario
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ ...box, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={fieldLabel}>Nombre</div>
+          <input style={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ana Pérez" />
+        </div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={fieldLabel}>Correo</div>
+          <input style={input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ana@empresa.com" />
+        </div>
+        <div style={{ width: 150 }}>
+          <div style={fieldLabel}>Rol</div>
+          <select
+            style={{ ...input, padding: "8px 10px" }}
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
+          >
+            <option value="AGENT">Vendedor</option>
+            <option value="ADMIN">Administrador</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ maxWidth: 320 }}>
+        <div style={fieldLabel}>Contraseña temporal</div>
+        <input
+          type="password"
+          style={input}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Mínimo 8 caracteres"
+          autoComplete="new-password"
+        />
+        <PasswordStrength value={password} />
+      </div>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <button
+          onClick={() => {
+            reset();
+            setOpen(false);
+          }}
+          style={ghostBtn}
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={() => create.mutate()}
+          disabled={!canSubmit || create.isPending}
+          style={primaryBtn}
+        >
+          {create.isPending ? "Creando…" : "Crear usuario"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -85,7 +198,10 @@ function SourcesEditor({
             <span style={{ opacity: 0.7 }}> · {s.contactCount}</span>
             <button
               onClick={() => {
-                if (confirm(`¿Eliminar la fuente "${s.name}"?`)) remove.mutate(s.id);
+                void confirmDialog({
+                  message: `¿Eliminar la fuente "${s.name}"?`,
+                  danger: true,
+                }).then((ok) => ok && remove.mutate(s.id));
               }}
               style={chipX}
               title="Eliminar"
@@ -144,21 +260,57 @@ function SellerRow({
     onSuccess: onSaved,
   });
 
+  const mutateUser = useMutation({
+    mutationFn: (patch: Parameters<typeof updateUser>[1]) =>
+      updateUser(seller.id, patch),
+    onSuccess: onSaved,
+    onError: (e) => toast.error((e as Error).message),
+  });
+
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const isAdmin = seller.role === "ADMIN";
 
   return (
-    <div style={box}>
+    <div style={{ ...box, opacity: seller.isActive ? 1 : 0.55 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={avatar}>{(seller.name ?? seller.email)[0]?.toUpperCase()}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <strong>{seller.name ?? seller.email}</strong>
-          <div style={{ ...muted, fontSize: 12 }}>
-            {seller.email} · {seller.role}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong>{seller.name ?? seller.email}</strong>
+            {!seller.isActive && <span style={chip("#5a4a2a")}>inactivo</span>}
           </div>
+          <div style={{ ...muted, fontSize: 12 }}>{seller.email}</div>
         </div>
+        <select
+          value={seller.role}
+          onChange={(e) =>
+            mutateUser.mutate({ role: e.target.value as Role })
+          }
+          disabled={mutateUser.isPending}
+          title="Rol"
+          style={roleSelect}
+        >
+          <option value="AGENT">Vendedor</option>
+          <option value="ADMIN">Administrador</option>
+        </select>
+        <button
+          onClick={() => {
+            if (seller.isActive) {
+              void confirmDialog({
+                message: `¿Desactivar a "${seller.name ?? seller.email}"? Se cerrarán sus sesiones y no podrá entrar.`,
+                danger: true,
+              }).then((ok) => ok && mutateUser.mutate({ isActive: false }));
+            } else {
+              mutateUser.mutate({ isActive: true });
+            }
+          }}
+          disabled={mutateUser.isPending}
+          style={seller.isActive ? dangerBtn : primaryBtn}
+        >
+          {seller.isActive ? "Desactivar" : "Reactivar"}
+        </button>
         {dirty && !isAdmin && (
           <button onClick={() => save.mutate()} disabled={save.isPending} style={primaryBtn}>
             {save.isPending ? "Guardando…" : "Guardar"}
@@ -201,6 +353,7 @@ const box: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   padding: 16,
+  boxShadow: "var(--shadow-card)",
 };
 
 const muted: React.CSSProperties = { color: "var(--muted)", fontSize: 14 };
@@ -223,6 +376,42 @@ const primaryBtn: React.CSSProperties = {
   color: "#04210f",
   fontWeight: 600,
   cursor: "pointer",
+};
+
+const ghostBtn: React.CSSProperties = {
+  padding: "9px 16px",
+  borderRadius: 8,
+  border: "1px solid var(--border)",
+  background: "transparent",
+  color: "var(--muted)",
+  cursor: "pointer",
+  fontSize: 14,
+};
+
+const dangerBtn: React.CSSProperties = {
+  padding: "9px 16px",
+  borderRadius: 8,
+  border: "1px solid #5a2a2a",
+  background: "transparent",
+  color: "#e08a8a",
+  cursor: "pointer",
+  fontSize: 14,
+  whiteSpace: "nowrap",
+};
+
+const fieldLabel: React.CSSProperties = {
+  fontSize: 12.5,
+  color: "var(--muted)",
+  marginBottom: 5,
+};
+
+const roleSelect: React.CSSProperties = {
+  padding: "7px 10px",
+  borderRadius: 8,
+  border: "1px solid var(--border)",
+  background: "var(--field)",
+  color: "var(--text)",
+  fontSize: 13,
 };
 
 const avatar: React.CSSProperties = {

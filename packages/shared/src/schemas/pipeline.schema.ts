@@ -20,7 +20,9 @@ export const dealDtoSchema = z.object({
     id: z.string(),
     name: z.string().nullable(),
     phone: z.string(),
+    fields: z.record(z.string()).default({}), // campos personalizados del lead
   }),
+  owner: z.object({ id: z.string(), name: z.string().nullable() }).nullable(),
   createdAt: z.string(),
 });
 export type DealDto = z.infer<typeof dealDtoSchema>;
@@ -44,6 +46,7 @@ export type CreateDealInput = z.infer<typeof createDealSchema>;
 export const updateDealSchema = z.object({
   title: z.string().min(1).max(160).optional(),
   value: z.number().nonnegative().nullable().optional(),
+  ownerId: z.string().nullable().optional(),
 });
 export type UpdateDealInput = z.infer<typeof updateDealSchema>;
 
@@ -51,6 +54,26 @@ export const moveDealSchema = z.object({
   stageId: z.string(),
 });
 export type MoveDealInput = z.infer<typeof moveDealSchema>;
+
+// ── Etapas (columnas configurables) ─────────────────────────
+export const createStageSchema = z.object({
+  name: z.string().min(1).max(60),
+  isWon: z.boolean().default(false),
+  isLost: z.boolean().default(false),
+});
+export type CreateStageInput = z.infer<typeof createStageSchema>;
+
+export const updateStageSchema = z.object({
+  name: z.string().min(1).max(60).optional(),
+  isWon: z.boolean().optional(),
+  isLost: z.boolean().optional(),
+});
+export type UpdateStageInput = z.infer<typeof updateStageSchema>;
+
+export const reorderStagesSchema = z.object({
+  ids: z.array(z.string()).min(1),
+});
+export type ReorderStagesInput = z.infer<typeof reorderStagesSchema>;
 
 // ── Contacto (para el selector al crear un deal) ────────────
 export const contactDtoSchema = z.object({

@@ -85,6 +85,8 @@ export const conversationDtoSchema = z.object({
     .nullable(),
   aiMode: z.nativeEnum(AiMode),
   aiPaused: z.boolean(),
+  // El contacto escribió y aún no le respondemos (pendiente de responder).
+  awaitingReply: z.boolean(),
   windowExpiresAt: z.string().nullable(),
   windowOpen: z.boolean(),
   lastMessageAt: z.string().nullable(),
@@ -101,8 +103,13 @@ export type SetAiModeInput = z.infer<typeof setAiModeSchema>;
 export const conversationFilter = ["all", "unassigned", "mine"] as const;
 export type ConversationFilter = (typeof conversationFilter)[number];
 
+// Filtro por estado de respuesta: pendientes vs ya respondidas.
+export const replyFilter = ["all", "pending", "replied"] as const;
+export type ReplyFilter = (typeof replyFilter)[number];
+
 export const conversationsQuerySchema = z.object({
   filter: z.enum(conversationFilter).default("all"),
+  reply: z.enum(replyFilter).default("all"),
   status: z.nativeEnum(ConversationStatus).optional(),
 });
 export type ConversationsQuery = z.infer<typeof conversationsQuerySchema>;

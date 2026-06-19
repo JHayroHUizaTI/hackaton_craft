@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Role } from "../enums.js";
 
 // Fuente (origen del lead).
 export const sourceDtoSchema = z.object({
@@ -28,9 +29,27 @@ export const sellerDtoSchema = z.object({
   name: z.string().nullable(),
   email: z.string(),
   role: z.string(),
+  isActive: z.boolean(),
   sourceIds: z.array(z.string()),
 });
 export type SellerDto = z.infer<typeof sellerDtoSchema>;
+
+// Crear un usuario del equipo (solo admin).
+export const createUserSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  password: z.string().min(8).max(200),
+  role: z.nativeEnum(Role).default(Role.AGENT),
+});
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+// Editar rol o estado (activo/inactivo) de un usuario (solo admin).
+export const updateUserSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  role: z.nativeEnum(Role).optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 
 // Respuesta del panel de vendedores.
 export const sellersResponseSchema = z.object({

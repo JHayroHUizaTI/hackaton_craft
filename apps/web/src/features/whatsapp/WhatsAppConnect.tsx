@@ -323,6 +323,7 @@ const card: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   padding: 22,
+  boxShadow: "var(--shadow-card)",
 };
 
 const row: React.CSSProperties = {

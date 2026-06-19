@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -15,10 +16,14 @@ import {
   registerSchema,
   refreshSchema,
   logoutSchema,
+  updateProfileSchema,
+  changePasswordSchema,
   type LoginInput,
   type RegisterInput,
   type RefreshInput,
   type LogoutInput,
+  type UpdateProfileInput,
+  type ChangePasswordInput,
   type AccessTokenClaims,
 } from "@crm/shared";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -66,10 +71,51 @@ export class AuthController {
     await this.auth.logout(body.refreshToken);
   }
 
+  // ── Perfil de la cuenta ────────────────────────────────────
+  @Get("me")
+  @UseGuards(JwtAuthGuard)
+  me(@CurrentUser() user: AccessTokenClaims) {
+    return this.auth.getMe(user.sub);
+  }
+
+  @Patch("me")
+  @UseGuards(JwtAuthGuard)
+  updateProfile(
+    @CurrentUser() user: AccessTokenClaims,
+    @Body(new ZodValidationPipe(updateProfileSchema)) body: UpdateProfileInput,
+  ) {
+    return this.auth.updateProfile(user.sub, body.name);
+  }
+
+  @Post("change-password")
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @CurrentUser() user: AccessTokenClaims,
+    @Body(new ZodValidationPipe(changePasswordSchema)) body: ChangePasswordInput,
+  ): Promise<void> {
+    await this.auth.changePassword(
+      user.sub,
+      body.currentPassword,
+      body.newPassword,
+      user.sid,
+    );
+  }
+
   @Get("sessions")
   @UseGuards(JwtAuthGuard)
   sessions(@CurrentUser() user: AccessTokenClaims) {
     return this.auth.listSessions(user.sub, user.sid);
+  }
+
+  // Cierra todas las demás sesiones (deja viva solo la actual).
+  @Delete("sessions")
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  async revokeOtherSessions(
+    @CurrentUser() user: AccessTokenClaims,
+  ): Promise<void> {
+    await this.auth.revokeOtherSessions(user.sub, user.sid);
   }
 
   @Delete("sessions/:id")

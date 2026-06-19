@@ -2,12 +2,18 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import type {
   CreateDealInput,
+  CreateStageInput,
   DealDto,
   MoveDealInput,
   PipelineDto,
+  ReorderStagesInput,
+  StageDto,
   UpdateDealInput,
+  UpdateStageInput,
 } from "@crm/shared";
 import { PrismaService } from "../../infra/prisma/prisma.service";
+
+const DEAL_INCLUDE = { contact: true, owner: true } as const;
 
 @Injectable()
 export class PipelineService {
@@ -21,7 +27,7 @@ export class PipelineService {
       this.prisma.pipelineStage.findMany({ orderBy: { order: "asc" } }),
       this.prisma.deal.findMany({
         orderBy: { createdAt: "desc" },
-        include: { contact: true },
+        include: DEAL_INCLUDE,
       }),
     ]);
     return {
@@ -56,7 +62,7 @@ export class PipelineService {
         value: input.value,
         currency: input.currency,
       },
-      include: { contact: true },
+      include: DEAL_INCLUDE,
     });
     this.events.emit("pipeline.changed", { dealId: deal.id });
     return this.toDealDto(deal);
@@ -72,7 +78,7 @@ export class PipelineService {
       .update({
         where: { id },
         data: { stageId: input.stageId },
-        include: { contact: true },
+        include: DEAL_INCLUDE,
       })
       .catch(() => {
         throw new NotFoundException("Deal no encontrado");
@@ -88,14 +94,101 @@ export class PipelineService {
         data: {
           ...(input.title !== undefined ? { title: input.title } : {}),
           ...(input.value !== undefined ? { value: input.value } : {}),
+          ...(input.ownerId !== undefined ? { ownerId: input.ownerId } : {}),
         },
-        include: { contact: true },
+        include: DEAL_INCLUDE,
       })
       .catch(() => {
         throw new NotFoundException("Deal no encontrado");
       });
     this.events.emit("pipeline.changed", { dealId: deal.id });
     return this.toDealDto(deal);
+  }
+
+  async deleteDeal(id: string): Promise<{ ok: true }> {
+    const deal = await this.prisma.deal.findUnique({ where: { id } });
+    if (!deal) throw new NotFoundException("Deal no encontrado");
+    await this.prisma.deal.delete({ where: { id } });
+    this.events.emit("pipeline.changed", { dealId: id });
+    return { ok: true };
+  }
+
+  // ── Etapas (columnas) ───────────────────────────────────────
+  async createStage(input: CreateStageInput): Promise<StageDto> {
+    const last = await this.prisma.pipelineStage.findFirst({
+      orderBy: { order: "desc" },
+    });
+    const s = await this.prisma.pipelineStage.create({
+      data: {
+        name: input.name,
+        isWon: input.isWon,
+        isLost: input.isLost,
+        order: (last?.order ?? -1) + 1,
+      },
+    });
+    this.events.emit("pipeline.changed", { dealId: "" });
+    return this.toStageDto(s);
+  }
+
+  async updateStage(id: string, input: UpdateStageInput): Promise<StageDto> {
+    const s = await this.prisma.pipelineStage
+      .update({
+        where: { id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.isWon !== undefined ? { isWon: input.isWon } : {}),
+          ...(input.isLost !== undefined ? { isLost: input.isLost } : {}),
+        },
+      })
+      .catch(() => {
+        throw new NotFoundException("Etapa no encontrada");
+      });
+    this.events.emit("pipeline.changed", { dealId: "" });
+    return this.toStageDto(s);
+  }
+
+  async deleteStage(id: string): Promise<{ ok: true }> {
+    const count = await this.prisma.deal.count({ where: { stageId: id } });
+    if (count > 0) {
+      throw new BadRequestException(
+        "La etapa tiene deals. Muévelos a otra etapa antes de borrarla.",
+      );
+    }
+    await this.prisma.pipelineStage.delete({ where: { id } }).catch(() => {
+      throw new NotFoundException("Etapa no encontrada");
+    });
+    this.events.emit("pipeline.changed", { dealId: "" });
+    return { ok: true };
+  }
+
+  // Reordena: usa órdenes negativos temporales para no chocar con @@unique.
+  async reorderStages(input: ReorderStagesInput): Promise<{ ok: true }> {
+    await this.prisma.$transaction([
+      ...input.ids.map((id, i) =>
+        this.prisma.pipelineStage.update({
+          where: { id },
+          data: { order: -(i + 1) },
+        }),
+      ),
+      ...input.ids.map((id, i) =>
+        this.prisma.pipelineStage.update({
+          where: { id },
+          data: { order: i },
+        }),
+      ),
+    ]);
+    this.events.emit("pipeline.changed", { dealId: "" });
+    return { ok: true };
+  }
+
+  private toStageDto(s: {
+    id: string;
+    name: string;
+    order: number;
+    isWon: boolean;
+    isLost: boolean;
+  }): StageDto {
+    return { id: s.id, name: s.name, order: s.order, isWon: s.isWon, isLost: s.isLost };
   }
 
   private toDealDto(d: {
@@ -105,7 +198,8 @@ export class PipelineService {
     currency: string;
     stageId: string;
     createdAt: Date;
-    contact: { id: string; name: string | null; phone: string };
+    contact: { id: string; name: string | null; phone: string; metadata?: unknown };
+    owner?: { id: string; name: string | null } | null;
   }): DealDto {
     return {
       id: d.id,
@@ -113,8 +207,24 @@ export class PipelineService {
       value: d.value === null ? null : Number(d.value),
       currency: d.currency,
       stageId: d.stageId,
-      contact: { id: d.contact.id, name: d.contact.name, phone: d.contact.phone },
+      contact: {
+        id: d.contact.id,
+        name: d.contact.name,
+        phone: d.contact.phone,
+        fields: this.fieldsFrom(d.contact.metadata),
+      },
+      owner: d.owner ? { id: d.owner.id, name: d.owner.name } : null,
       createdAt: d.createdAt.toISOString(),
     };
+  }
+
+  private fieldsFrom(metadata: unknown): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (metadata && typeof metadata === "object") {
+      for (const [k, v] of Object.entries(metadata as Record<string, unknown>)) {
+        if (v != null) out[k] = String(v);
+      }
+    }
+    return out;
   }
 }

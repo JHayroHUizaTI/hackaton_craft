@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmDialog } from "@/lib/confirm";
+import { toast } from "@/lib/toast";
 import type { CampaignDto } from "@crm/shared";
 import {
   cancelCampaign,
@@ -29,7 +31,12 @@ export function CampaignsManager() {
 
   const launch = useMutation({
     mutationFn: launchCampaign,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaigns"] }),
+    onSuccess: (c) => {
+      toast.success(
+        c.status === "SCHEDULED" ? "Campaña programada" : "Campaña lanzada",
+      );
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+    },
   });
   const cancel = useMutation({
     mutationFn: cancelCampaign,
@@ -76,7 +83,10 @@ export function CampaignsManager() {
                 onLaunch={() => launch.mutate(c.id)}
                 onCancel={() => cancel.mutate(c.id)}
                 onDelete={() => {
-                  if (confirm(`¿Eliminar la campaña "${c.name}"?`)) remove.mutate(c.id);
+                  void confirmDialog({
+                    message: `¿Eliminar la campaña "${c.name}"?`,
+                    danger: true,
+                  }).then((ok) => ok && remove.mutate(c.id));
                 }}
               />
             ))}

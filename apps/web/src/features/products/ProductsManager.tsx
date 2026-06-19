@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmDialog } from "@/lib/confirm";
 import type { CreateProductInput, ProductDto } from "@crm/shared";
 import {
   createProduct,
@@ -92,7 +93,10 @@ export function ProductsManager() {
                 </button>
                 <button
                   onClick={() => {
-                    if (confirm(`¿Eliminar "${p.name}"?`)) remove.mutate(p.id);
+                    void confirmDialog({
+                      message: `¿Eliminar "${p.name}"?`,
+                      danger: true,
+                    }).then((ok) => ok && remove.mutate(p.id));
                   }}
                   style={{ ...ghostBtn, color: "#e08a8a", borderColor: "#5a2a2a" }}
                 >
@@ -189,6 +193,7 @@ const card: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   overflow: "hidden",
+  boxShadow: "var(--shadow-card)",
 };
 
 const thumb: React.CSSProperties = {

@@ -32,6 +32,18 @@ export const logoutSchema = z.object({
 });
 export type LogoutInput = z.infer<typeof logoutSchema>;
 
+// ── Perfil de la cuenta ──────────────────────────────────────
+export const updateProfileSchema = z.object({
+  name: z.string().min(1).max(120),
+});
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200),
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
 // ── Respuestas ───────────────────────────────────────────────
 export const publicUserSchema = z.object({
   id: z.string(),
