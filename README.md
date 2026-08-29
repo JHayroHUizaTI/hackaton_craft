@@ -1,66 +1,58 @@
-# CRM Prime — CRM para WhatsApp con Agentes IA
+# RUBRIC
 
-Monorepo Turborepo. Backend NestJS (única fuente de lógica), frontend Next.js
-(cliente web + BFF), futura app móvil React Native (Expo). Ver
-[`proyecto.md`](./proyecto.md) para el plan completo.
+Ensaya un pitch de 45 segundos o 3 minutos contra una rúbrica publicada. RUBRIC
+transcribe el audio, puntúa cinco criterios, propone exactamente tres cambios y
+muestra el delta del siguiente intento. El leaderboard y los contadores se
+actualizan en vivo con Convex.
 
-```
-apps/
-  api/        NestJS — API REST, Prisma, auth, IA, WhatsApp
-  web/        Next.js — UI web + BFF (reenvía a la API con el token en cookie httpOnly)
-packages/
-  shared/     Zod + tipos compartidos (validación única para web y móvil)
-```
+## Puesta en marcha (60 segundos)
 
-## Requisitos
-
-- Node.js ≥ 20
-- Docker (para Postgres con pgvector + Redis)
-
-## Puesta en marcha
+Requisitos: Node.js 20+, una cuenta de Convex y una API key de OpenAI.
 
 ```bash
-# 1. Instalar dependencias (raíz del monorepo)
 npm install
+cd apps/rubric
+npx convex dev
+```
 
-# 2. Levantar base de datos y Redis
-docker compose up -d
+En otra terminal:
 
-# 3. Compilar el paquete compartido (lo consumen api y web)
-npm run build -w @crm/shared
-
-# 4. Generar el cliente Prisma, migrar y sembrar datos
-npm run db:generate
-npm run db:migrate          # crea las tablas
-npm run db:seed             # admin + etapas de pipeline + agente IA
-
-# 5. Arrancar todo en desarrollo (api + web)
+```bash
+npx convex env set OPENAI_API_KEY sk-...
+npx convex env set OPENAI_SCORING_MODEL gpt-4o-mini
 npm run dev
 ```
 
-- API: http://localhost:3001/api/v1 (health: `/api/v1/health`)
-- Web: http://localhost:3000
-- Login de prueba: **admin@crm.local** / **admin1234**
+Abre <http://localhost:3000>. `npx convex dev` crea `.env.local` con
+`NEXT_PUBLIC_CONVEX_URL`; las claves de OpenAI viven únicamente en el entorno de
+Convex y nunca llegan al navegador.
 
-## Habilitar pgvector
+## Arquitectura
 
-Tras la primera migración, habilita la extensión y crea el índice vectorial
-(Prisma no lo expresa en el schema):
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE INDEX ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);
+```text
+MediaRecorder
+  -> URL de subida firmada
+  -> Convex Storage
+  -> Convex Action
+       -> OpenAI Transcriptions (gpt-4o-mini-transcribe)
+       -> OpenAI Responses (JSON Schema estricto)
+  -> attempts / scores / counters en Convex
+  -> suscripciones reactivas de Next.js
 ```
 
-> La imagen `pgvector/pgvector` ya trae la extensión instalada; solo falta el
-> `CREATE EXTENSION` y el índice cuando empieces la Fase 5 (RAG).
+Convex es el único datastore y backend operativo. El código NestJS/Prisma de la
+etapa CRM ya no forma parte del workspace ejecutable; la especificación histórica
+se conserva en [`crm_prime.sams.md`](./crm_prime.sams.md).
 
-## Auth (resumen)
+## Verificación
 
-- `POST /api/v1/auth/login` → `{ accessToken, refreshToken, expiresIn, user }`
-- `POST /api/v1/auth/refresh` → rota el refresh token (detección de reuso)
-- `POST /api/v1/auth/logout` → revoca la sesión
-- `GET  /api/v1/auth/sessions` → dispositivos conectados (requiere Bearer)
+```bash
+npm run typecheck
+npm test
+npm run build
+```
 
-La web usa NextAuth (cookie httpOnly); la futura app móvil pega directo a estos
-endpoints guardando el token en SecureStore/Keychain.
+La implementación sigue [`crm_prime.md`](./crm_prime.md), el PRD acotado para el
+hackathon Learning by Shipping. El guion cronometrado, las preguntas de defensa
+y la lista de ensayos están en [`docs/DEMO_RUNBOOK.md`](./docs/DEMO_RUNBOOK.md).
+# hackaton_craft
